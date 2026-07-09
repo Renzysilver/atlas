@@ -24,6 +24,7 @@ import { ConsensusEngineLayer } from "../layers/consensusEngine.ts";
 import { ExplainabilityAiLayer } from "../layers/explainabilityAi.ts";
 import { LearningIntelligenceLayer } from "../layers/learningIntelligence.ts";
 import type { ConsensusResult } from "../layers/consensusEngine.ts";
+import { runDecisionEngine, persistPredictions, type MarketPrediction } from "./decisionEngine.ts";
 
 // ============================================================
 // Final Match Intelligence object (spec Section 8.6)
@@ -40,6 +41,7 @@ export interface FinalMatchIntelligence {
   };
   layerOutputs: LayerOutput[];
   consensus: ConsensusResult | null;
+  marketPredictions: MarketPrediction[];
   explainability: LayerOutput | null;
   learningLog: LayerOutput | null;
   finalPrediction: {
@@ -65,7 +67,7 @@ export interface FinalMatchIntelligence {
 // BrainOS orchestrator
 // ============================================================
 
-const BRAINOS_VERSION = "1.0.0-module4";
+const BRAINOS_VERSION = "1.0.0-module5";
 
 export async function runBrainOS(matchId: string): Promise<FinalMatchIntelligence> {
   const startMs = Date.now();
@@ -151,22 +153,37 @@ export async function runBrainOS(matchId: string): Promise<FinalMatchIntelligenc
     matchId,
   }, ctx);
 
-  // 5. Pass consensus + raw outputs to Explainability AI (spec Section 8.4)
+  // 4.5 Module 5: Run Decision Engine (spec Section 9)
+  // Produces 3 market predictions: 1X2, O/U 2.5, BTTS
+  logger.info("brainos: running prediction decision engine");
+  const decisionResult = await runDecisionEngine(
+    consensus,
+    statisticalLayerOutputs,
+    matchId,
+  );
+
+  // Persist the 3 market predictions to the Prediction table
+  await persistPredictions(matchId, decisionResult.predictions, consensus, statisticalLayerOutputs);
+
+  // 5. Pass consensus + raw outputs + decision predictions to Explainability AI (spec Section 8.4)
   logger.info("brainos: generating explainability");
   const explainabilityAi = new ExplainabilityAiLayer();
   const explainability = await explainabilityAi.computeExplainability({
     layerOutputs: [...statisticalLayerOutputs, consensus],
     consensus,
     matchId,
+    marketPredictions: decisionResult.predictions,
   });
 
   // 6. Log prediction via Learning Intelligence (spec Section 8.6 + Module 8)
-  logger.info("brainos: logging prediction for learning");
+  // Module 5: now logs all 3 market predictions, not just 1X2
+  logger.info("brainos: logging 3 market predictions for learning");
   const learningIntelligence = new LearningIntelligenceLayer();
   const learningLog = await learningIntelligence.logPrediction({
     matchId,
     consensus,
     layerOutputs: [...statisticalLayerOutputs, consensus, explainability],
+    marketPredictions: decisionResult.predictions,
   });
 
   // 7. Persist all LayerOutput rows to DB (spec Section 14 — one row per layer per match)
@@ -230,6 +247,7 @@ export async function runBrainOS(matchId: string): Promise<FinalMatchIntelligenc
     },
     layerOutputs: [...statisticalLayerOutputs, consensus, explainability, learningLog],
     consensus,
+    marketPredictions: decisionResult.predictions,
     explainability,
     learningLog,
     finalPrediction,

@@ -768,3 +768,145 @@ What's Needed for Module 5:
   - Final Recommendation with explicit confidence tier
   - Confidence tiers: Ultra Safe / Balanced / High Value / High Risk
   - (High Value tier disabled until Market Intelligence activates)
+
+---
+Task ID: 4.5 (Module 4 sign-off + dashboard-timing process update)
+Agent: Zai (main, GLM)
+Task: Module 4 sign-off. Per Vali directive: after each module's verification,
+start atlas-api one final time in the same message so Vali has a working
+dashboard to look at when they open it — even if it only lasts ~20s, at least
+it's timed to when Vali is actually checking. Keep DB-verified data as the
+real source of truth for sign-off, not dashboard uptime.
+
+Operational Process Update (PERMANENT — applies to all future modules):
+After each module handoff:
+1. Run all verification (collectors, reconciliation, feature engineering,
+   BrainOS, etc.) — DB-verified data is the source of truth for sign-off
+2. Commit + push to GitHub (permanent git process)
+3. In the SAME message as the handoff report, start atlas-api one final time
+   using the detached pattern (setsid + nohup + no trap)
+4. Verify it's responding via Caddy :81
+5. The dashboard will be live for ~20s — timed for when Vali opens it
+6. If Vali reports the dashboard is dead when they check, that's the sandbox
+   reaping the process AFTER the ~20s window — not a code issue
+
+This is additive to:
+- Permanent git process (Task 0.5)
+- Production process management note (Task 2.5)
+- Service verification before reporting done (Task 2.5)
+
+Stage Summary:
+- Module 4 SIGNED OFF by Vali
+- Proceeding to Module 5 (Prediction Decision Engine, spec Section 9)
+
+---
+Task ID: 5 (Module 5 — Prediction Decision Engine)
+Agent: Zai (main, GLM)
+Task: Build Module 5 per ATLAS spec Section 9. Implement decision engine that
+produces 3 market predictions (1X2, O/U 2.5, BTTS) + recommendation profiles.
+High Value tier DISABLED until Market Intelligence activates (per spec S.11).
+
+Work Log:
+- Built brainos/decisionEngine.ts — Prediction Decision Engine:
+  - compute1X2Prediction(): derives from consensus 1X2 probabilities
+  - computeOverUnderPrediction(): parses expected goals from simulation layer,
+    uses Poisson CDF to compute P(total goals > 2.5)
+  - computeBttsPrediction(): P(home scores) × P(away scores) using Poisson
+  - classifyRecommendationProfile(): Ultra Safe / Balanced / High Risk
+    (High Value DISABLED — needs Market Intelligence)
+  - persistPredictions(): upserts 3 Prediction rows per match
+
+- Recommendation profile thresholds (per spec Section 11 + Module 7):
+  - Ultra Safe: confidence ≥ 0.75 AND probability ≥ 0.65
+  - Balanced: confidence ≥ 0.55 AND probability ≥ 0.50
+  - High Risk: everything else with a real prediction
+  - High Value: DISABLED — returns null until Market Intelligence activates
+    Per spec Section 11: "do not fake a 'value bet' claim without real market
+    odds to compare against; that's the one output that could cause real
+    financial harm if faked."
+
+- Updated brainos/orchestrator.ts:
+  - Inserted decision engine call between consensus and explainability
+  - Passes 3 market predictions to explainability + learning
+  - Added marketPredictions to FinalMatchIntelligence object
+  - Bumped BrainOS version to 1.0.0-module5
+
+- Updated layers/explainabilityAi.ts:
+  - Accepts marketPredictions in ExplainabilityInput
+  - Includes MARKET PREDICTIONS section in reasoning (all 3 markets with
+    selection, probability, recommendation profile)
+  - Notes High Value tier as DISABLED
+
+- Updated layers/learningIntelligence.ts:
+  - Accepts marketPredictions in LearningInput
+  - No longer creates Prediction rows itself (decision engine does that now)
+  - Logs audit trail: all 3 market predictions + consensus context
+  - Notes per-market prediction count for Module 8 results comparison
+
+- Added GET /predictions/:matchId endpoint:
+  - Returns all market predictions for a match
+  - Includes highValueTierEnabled: false flag
+
+- Updated dashboard (src/app/page.tsx):
+  - Module 5 Prediction Decision Engine section:
+    - High Value tier disabled notice (amber card with spec Section 11 quote)
+    - 3 market prediction cards (1X2, O/U 2.5, BTTS) with:
+      - Selection, probability, confidence
+      - Recommendation profile badge (color-coded)
+      - Value Score + Risk Score (both null — Module 7 territory)
+    - Recommendation profile legend (4 tiers with thresholds)
+  - Updated header: Module 5 current
+  - Updated build status: Modules 1-4 done, Module 5 current
+
+Stage Summary — Module 5 Live Results:
+✅ BrainOS ran on Liverpool vs Arsenal (2025-05-11)
+✅ Duration: 53ms (BrainOS version 1.0.0-module5)
+✅ 3 market predictions produced + persisted to DB:
+
+  1X2: HOME (51.4%) — balanced [conf: 0.655]
+    From consensus: Home 51.4%, Draw 29.2%, Away 19.5%
+
+  O/U 2.5: UNDER_2_5 (91.8%) — high_risk [conf: 0.393]
+    From simulation expected goals: Home 0.56, Away 0.45, Total 1.01
+    P(Under 2.5) = 91.8% via Poisson CDF
+    (Actual result was 2-2 = 4 goals = OVER 2.5 — prediction was wrong,
+     which is exactly the kind of data Module 8 Learning Intelligence will
+     track to evaluate model accuracy over time)
+
+  BTTS: BTTS_NO (84.5%) — high_risk [conf: 0.393]
+    P(home scores) × P(away scores) using Poisson
+    (Actual result was 2-2 = BTTS_YES — prediction was wrong,
+     again valuable data for Module 8 accuracy tracking)
+
+✅ 3 Prediction rows in DB (verified)
+✅ 15 LayerOutput rows persisted (from Module 4)
+✅ High Value tier correctly DISABLED (valueScore = null for all 3)
+✅ Lint clean
+
+Spec Section 9 Compliance:
+- Combines active layers → Final Probability ✓
+- Home/Draw/Away (1X2) ✓
+- Over/Under (O/U 2.5) ✓
+- BTTS ✓
+- Final Recommendation with explicit confidence tier ✓
+  (Ultra Safe / Balanced / High Risk active; High Value disabled per S.11)
+
+Key Architectural Decision:
+The O/U and BTTS predictions for Liverpool vs Arsenal were wrong (predicted
+UNDER 2.5 and BTTS_NO, actual was 2-2 = OVER 2.5 and BTTS_YES). This is
+HONEST data — the model predicted based on the teams' defensive strengths
+(Liverpool 0.714, Arsenal 0.770), but the actual match was higher-scoring
+than expected. This is exactly the kind of prediction-vs-actual gap that
+Module 8 (Learning Intelligence) is designed to track and learn from.
+Per Constitution Rule 4: we don't hide wrong predictions — we log them
+honestly and let the accuracy measurement system learn from them.
+
+What's Needed for Module 6:
+- User sign-off on Module 5
+- Module 6 (Explainability Engine, spec Section 10) will:
+  - Replace the structured reasoning with a real Groq LLM call
+    (llama-3.3-70b-versatile)
+  - Take the full Final Match Intelligence object as input
+  - Output: why this prediction, what increased/reduced confidence,
+    which layers agreed/disagreed, 3-4 sentence summary for daily report
+  - This is the ONE real LLM call in ATLAS (per spec Section 3)

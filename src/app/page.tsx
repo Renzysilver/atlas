@@ -158,6 +158,7 @@ interface FinalMatchIntelligence {
     layersExcluded: number
     agreementScore: number
   } | null
+  marketPredictions: MarketPrediction[]
   finalPrediction: {
     market: string
     selection: string
@@ -175,6 +176,19 @@ interface FinalMatchIntelligence {
     layersFuture: number
     brainosVersion: string
   }
+}
+
+// Module 5 — Decision Engine types
+interface MarketPrediction {
+  marketType: string
+  selection: string
+  probability: number
+  confidence: number
+  recommendationProfile: string | null
+  reasoning: string
+  valueScore: null
+  riskScore: null
+  volatility: null
 }
 
 // ============================================================
@@ -431,7 +445,7 @@ export default function Home() {
               <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-bold tracking-tight text-stone-900">ATLAS</h1>
                 <Badge variant="outline" className="text-xs">v1.0 · Phase 1</Badge>
-                <Badge className="bg-stone-900 text-stone-50">Module 4 / 9 — Intelligence Engine</Badge>
+                <Badge className="bg-stone-900 text-stone-50">Module 5 / 9 — Decision Engine</Badge>
               </div>
               <p className="mt-1 text-sm text-stone-600">
                 Institutional Football Intelligence Platform · English Premier League · Built per Master Build Prompt v1.0
@@ -555,8 +569,9 @@ export default function Home() {
               <div className="flex justify-between"><span className="text-stone-600">Module 1 — Data Collection</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
               <div className="flex justify-between"><span className="text-stone-600">Module 2 — Cleaning</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
               <div className="flex justify-between"><span className="text-stone-600">Module 3 — Features</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
-              <div className="flex justify-between"><span className="text-stone-600">Module 4 — 17 Layers</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">current</Badge></div>
-              <div className="flex justify-between"><span className="text-stone-600">Modules 5-9</span><Badge variant="outline">queued</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Module 4 — 17 Layers</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Module 5 — Decision Engine</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">current</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Modules 6-9</span><Badge variant="outline">queued</Badge></div>
             </CardContent>
           </Card>
         </section>
@@ -1080,6 +1095,112 @@ export default function Home() {
               </CardContent>
             </Card>
           )}
+        </section>
+
+        {/* Module 5 — Prediction Decision Engine */}
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-lg font-semibold text-stone-900">Module 5 — Prediction Decision Engine</h2>
+              <p className="text-sm text-stone-600">
+                Spec Section 9 — 3 market predictions (1X2, O/U 2.5, BTTS) + recommendation profiles
+              </p>
+            </div>
+          </div>
+
+          {/* High Value tier disabled notice */}
+          <Card className="mb-3 border-amber-300 bg-amber-50">
+            <CardContent className="py-3 text-xs text-amber-900">
+              <strong>High Value tier: DISABLED</strong> — requires Market Intelligence (Layer 8) for value score
+              calculation. Per spec Section 11: "do not fake a 'value bet' claim without real market odds to compare
+              against; that's the one output that could cause real financial harm if faked." Active when ODDS_API_KEY is provided.
+            </CardContent>
+          </Card>
+
+          {/* Market predictions from latest BrainOS run */}
+          {latestFmi && latestFmi.marketPredictions && latestFmi.marketPredictions.length > 0 ? (
+            <div className="grid gap-3 md:grid-cols-3">
+              {latestFmi.marketPredictions.map((mp) => (
+                <Card key={mp.marketType}>
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between">
+                      <CardTitle className="text-sm font-mono">{mp.marketType}</CardTitle>
+                      {mp.recommendationProfile && (
+                        <Badge
+                          className={
+                            mp.recommendationProfile === 'ultra_safe'
+                              ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                              : mp.recommendationProfile === 'balanced'
+                                ? 'bg-blue-100 text-blue-800 border-blue-200'
+                                : mp.recommendationProfile === 'high_value'
+                                  ? 'bg-purple-100 text-purple-800 border-purple-200'
+                                  : 'bg-red-100 text-red-800 border-red-200'
+                          }
+                        >
+                          {mp.recommendationProfile.replace('_', ' ').toUpperCase()}
+                        </Badge>
+                      )}
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <div>
+                      <p className="text-xs text-stone-500">Selection</p>
+                      <p className="text-lg font-bold text-stone-900">{mp.selection.replace(/_/g, ' ')}</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <p className="text-stone-500">Probability</p>
+                        <p className="font-mono font-semibold">{(mp.probability * 100).toFixed(1)}%</p>
+                      </div>
+                      <div>
+                        <p className="text-stone-500">Confidence</p>
+                        <p className="font-mono font-semibold">{mp.confidence.toFixed(3)}</p>
+                      </div>
+                    </div>
+                    <div className="pt-1 border-t border-stone-100">
+                      <p className="text-[10px] text-stone-400">
+                        Value Score: {mp.valueScore === null ? 'null (needs Market Intelligence)' : mp.valueScore}
+                      </p>
+                      <p className="text-[10px] text-stone-400">
+                        Risk Score: {mp.riskScore === null ? 'null (Module 7)' : mp.riskScore}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <Card>
+              <CardContent className="py-6 text-center text-sm text-stone-500">
+                No market predictions yet. Run BrainOS on a match to generate 1X2, O/U 2.5, and BTTS predictions.
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Recommendation profile legend */}
+          <Card className="mt-3">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs">Recommendation Profile Tiers</CardTitle>
+            </CardHeader>
+            <CardContent className="text-xs space-y-1">
+              <div className="flex items-center gap-2">
+                <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">ULTRA SAFE</Badge>
+                <span className="text-stone-600">confidence ≥ 0.75 AND probability ≥ 0.65</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge className="bg-blue-100 text-blue-800 border-blue-200">BALANCED</Badge>
+                <span className="text-stone-600">confidence ≥ 0.55 AND probability ≥ 0.50</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge className="bg-red-100 text-red-800 border-red-200">HIGH RISK</Badge>
+                <span className="text-stone-600">lower confidence or probability — proceed with caution</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge className="bg-purple-100 text-purple-800 border-purple-200">HIGH VALUE</Badge>
+                <span className="text-stone-600">DISABLED — requires Market Intelligence (Layer 8) + Value Score</span>
+              </div>
+            </CardContent>
+          </Card>
         </section>
 
         {/* DB Tables + Recent Runs */}

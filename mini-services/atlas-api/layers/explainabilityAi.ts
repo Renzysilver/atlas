@@ -24,11 +24,13 @@
 import type { LayerOutput } from "@atlas/shared";
 import { BaseLayer, type LayerContext, type LayerDefinition } from "./base.ts";
 import type { ConsensusResult } from "./consensusEngine.ts";
+import type { MarketPrediction } from "../brainos/decisionEngine.ts";
 
 export interface ExplainabilityInput {
   layerOutputs: LayerOutput[];
   consensus: ConsensusResult;
   matchId: string;
+  marketPredictions?: MarketPrediction[];
 }
 
 export class ExplainabilityAiLayer extends BaseLayer {
@@ -42,7 +44,7 @@ export class ExplainabilityAiLayer extends BaseLayer {
 
   // Special compute method — takes layer outputs + consensus
   async computeExplainability(input: ExplainabilityInput): Promise<LayerOutput> {
-    const { layerOutputs, consensus } = input;
+    const { layerOutputs, consensus, marketPredictions } = input;
 
     // Extract active layers that fed consensus
     const activeLayers = layerOutputs.filter(
@@ -94,6 +96,12 @@ export class ExplainabilityAiLayer extends BaseLayer {
       ``,
       `PREDICTION: ${prediction}`,
       `Confidence: ${consensus.confidence?.toFixed(3) ?? "null"}`,
+      ``,
+      `MARKET PREDICTIONS (Module 5 — Decision Engine):`,
+      ...(marketPredictions ?? []).map((mp) =>
+        `  ${mp.marketType}: ${mp.selection} (${(mp.probability * 100).toFixed(1)}%) — ${mp.recommendationProfile ?? "N/A"} [conf: ${mp.confidence.toFixed(3)}]`,
+      ),
+      `  High Value tier: DISABLED (requires Market Intelligence — per spec Section 11)`,
       ``,
       `WHY THIS PREDICTION:`,
       `  Consensus score ${consensus.score.toFixed(3)} computed from ${consensus.layersContributing} active layers.`,

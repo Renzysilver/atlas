@@ -1,11 +1,12 @@
 // ATLAS API — routes/brainos.ts
-// Module 4 — BrainOS + Layer endpoints
+// Module 4 + 5 — BrainOS + Layer + Prediction endpoints
 //
 //   POST /brainos/run/:matchId   — run BrainOS for a specific match
 //   GET  /brainos/fmi/:matchId    — get Final Match Intelligence for a match
 //   GET  /layers                  — list all 17 layers + status
 //   GET  /layers/registry         — layer definitions
 //   GET  /layers/:matchId         — all layer outputs for a match
+//   GET  /predictions/:matchId    — all market predictions for a match (Module 5)
 
 import { Router } from "express";
 import { db } from "../lib/db.ts";
@@ -131,3 +132,46 @@ brainosRouter.get("/layers/:matchId", async (req, res) => {
     layers: layerOutputs,
   });
 });
+
+// Module 5 — Prediction Decision Engine endpoints
+brainosRouter.get("/predictions/:matchId", async (req, res) => {
+  const { matchId } = req.params;
+
+  const match = await db.match.findUnique({
+    where: { id: matchId },
+    include: { homeTeam: true, awayTeam: true },
+  });
+
+  if (!match) {
+    res.status(404).json({ error: "Match not found" });
+    return;
+  }
+
+  const predictions = await db.prediction.findMany({
+    where: { matchId },
+    orderBy: { marketType: "asc" },
+  });
+
+  res.json({
+    matchId,
+    match: {
+      homeTeam: match.homeTeam.name,
+      awayTeam: match.awayTeam.name,
+      kickoff: match.kickoffUtc.toISOString(),
+      score: match.homeScore !== null ? `${match.homeScore}-${match.awayScore}` : null,
+    },
+    predictions: predictions.map((p) => ({
+      marketType: p.marketType,
+      selection: p.selection,
+      probability: p.probability,
+      confidence: p.confidence,
+      recommendationProfile: p.recommendationProfile,
+      valueScore: p.valueScore,
+      riskScore: p.riskScore,
+      volatility: p.volatility,
+      createdAt: p.createdAt.toISOString(),
+    })),
+    highValueTierEnabled: false, // always false until Market Intelligence activates
+  });
+});
+
