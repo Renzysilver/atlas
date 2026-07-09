@@ -220,3 +220,56 @@ brainosRouter.get("/explainability/:matchId", async (req, res) => {
   });
 });
 
+// Module 7 — Risk Management endpoint
+brainosRouter.get("/risk/:matchId", async (req, res) => {
+  const { matchId } = req.params;
+
+  const match = await db.match.findUnique({
+    where: { id: matchId },
+    include: { homeTeam: true, awayTeam: true },
+  });
+
+  if (!match) {
+    res.status(404).json({ error: "Match not found" });
+    return;
+  }
+
+  const predictions = await db.prediction.findMany({
+    where: { matchId },
+    orderBy: { marketType: "asc" },
+  });
+
+  if (predictions.length === 0) {
+    res.status(404).json({
+      error: "No predictions found. Run POST /brainos/run/:matchId first.",
+    });
+    return;
+  }
+
+  res.json({
+    matchId,
+    match: {
+      homeTeam: match.homeTeam.name,
+      awayTeam: match.awayTeam.name,
+      kickoff: match.kickoffUtc.toISOString(),
+      score: match.homeScore !== null ? `${match.homeScore}-${match.awayScore}` : null,
+    },
+    riskAssessment: {
+      perMarketRisk: predictions.map((p) => ({
+        marketType: p.marketType,
+        selection: p.selection,
+        probability: p.probability,
+        confidence: p.confidence,
+        riskScore: p.riskScore,
+        volatility: p.volatility,
+        valueScore: p.valueScore,
+        recommendationProfile: p.recommendationProfile,
+      })),
+      valueScoreEnabled: false, // always false until Market Intelligence activates
+      valueScoreReason:
+        "Value Score requires real market odds from Market Intelligence (Layer 8). " +
+        "ODDS_API_KEY not configured. Per spec Section 11: NEVER fabricate a value bet claim.",
+    },
+  });
+});
+

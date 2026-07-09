@@ -25,6 +25,7 @@ import { ExplainabilityAiLayer } from "../layers/explainabilityAi.ts";
 import { LearningIntelligenceLayer } from "../layers/learningIntelligence.ts";
 import type { ConsensusResult } from "../layers/consensusEngine.ts";
 import { runDecisionEngine, persistPredictions, type MarketPrediction } from "./decisionEngine.ts";
+import { runRiskEngine, persistRiskAssessment, type RiskAssessment } from "./riskEngine.ts";
 
 // ============================================================
 // Final Match Intelligence object (spec Section 8.6)
@@ -42,6 +43,7 @@ export interface FinalMatchIntelligence {
   layerOutputs: LayerOutput[];
   consensus: ConsensusResult | null;
   marketPredictions: MarketPrediction[];
+  riskAssessment: RiskAssessment | null;
   explainability: LayerOutput | null;
   learningLog: LayerOutput | null;
   finalPrediction: {
@@ -67,7 +69,7 @@ export interface FinalMatchIntelligence {
 // BrainOS orchestrator
 // ============================================================
 
-const BRAINOS_VERSION = "1.0.0-module6";
+const BRAINOS_VERSION = "1.0.0-module7";
 
 export async function runBrainOS(matchId: string): Promise<FinalMatchIntelligence> {
   const startMs = Date.now();
@@ -165,6 +167,18 @@ export async function runBrainOS(matchId: string): Promise<FinalMatchIntelligenc
   // Persist the 3 market predictions to the Prediction table
   await persistPredictions(matchId, decisionResult.predictions, consensus, statisticalLayerOutputs);
 
+  // 4.6 Module 7: Run Risk Management Engine (spec Section 11)
+  // Computes confidence + risk + volatility from active layer variance
+  // Value Score stays null until Market Intelligence activates (per spec S.11)
+  logger.info("brainos: running risk management engine");
+  const riskAssessment = await runRiskEngine(
+    consensus,
+    statisticalLayerOutputs,
+    decisionResult.predictions,
+    matchId,
+  );
+  await persistRiskAssessment(matchId, riskAssessment);
+
   // 5. Pass consensus + raw outputs + decision predictions to Explainability AI (spec Section 8.4)
   // Module 6: pass matchContext so the LLM prompt has team names + kickoff
   logger.info("brainos: generating explainability (Module 6: Groq LLM if configured)");
@@ -254,6 +268,7 @@ export async function runBrainOS(matchId: string): Promise<FinalMatchIntelligenc
     layerOutputs: [...statisticalLayerOutputs, consensus, explainability, learningLog],
     consensus,
     marketPredictions: decisionResult.predictions,
+    riskAssessment,
     explainability,
     learningLog,
     finalPrediction,

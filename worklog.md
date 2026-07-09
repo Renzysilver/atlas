@@ -1012,3 +1012,79 @@ What's Needed for Module 7:
   - Value Score stays insufficient_data until Market Intelligence activates
   - Recommendation profiles (Ultra Safe / Balanced / High Value / High Risk)
   - High Value tier disabled until Market Intelligence (per spec S.11)
+
+---
+Task ID: 7 (Module 7 — Risk Management Engine)
+Agent: Zai (main, GLM)
+Task: Build Module 7 per ATLAS spec Section 11. Compute confidence + risk +
+volatility from active layer variance. Value Score stays null until Market
+Intelligence activates (per spec S.11 — never fake a value bet).
+
+Work Log:
+- Built brainos/riskEngine.ts — Risk Management Engine:
+  - VOLATILITY: from layer score variance (normalized × 4, capped at 1.0)
+  - RISK SCORE: composite of volatility (50%) + confidence inverse (35%) +
+    layer count risk (15% — penalizes <5 active layers)
+  - VALUE SCORE: always null until Market Intelligence activates
+    Per spec Section 11: "do not fake a 'value bet' claim without real market
+    odds to compare against; that's the one output that could cause real
+    financial harm if faked"
+  - RECOMMENDATION PROFILE: risk-adjusted confidence thresholds
+    (Ultra Safe / Balanced / High Risk; High Value DISABLED)
+  - PER-MARKET RISK: applies global risk to each of 3 market predictions
+  - persistRiskAssessment(): updates Prediction rows with risk fields
+
+- Updated brainos/orchestrator.ts:
+  - Inserted risk engine call after decision engine
+  - Added riskAssessment to FinalMatchIntelligence object
+  - BrainOS version bumped to 1.0.0-module7
+
+- Added GET /risk/:matchId endpoint:
+  - Returns per-market risk assessment
+  - valueScoreEnabled: false flag
+  - valueScoreReason explaining why value score is null
+
+- Updated dashboard (src/app/page.tsx):
+  - Module 7 Risk Management section:
+    - Value Score disabled notice (red card with spec S.11 quote)
+    - 4 risk metric cards: Confidence, Risk Score, Volatility, Recommendation
+    - Color-coded (green/amber/red) based on thresholds
+    - Per-market risk table with all 3 markets
+  - Updated header: Module 7 current
+  - Updated build status: Modules 1-6 done, Module 7 current
+
+Stage Summary — Module 7 Live Results:
+✅ BrainOS ran on Liverpool vs Arsenal with Module 7 code
+✅ Duration: 108ms (BrainOS version 1.0.0-module7)
+✅ Risk assessment computed:
+  - Confidence: 0.661 (from consensus)
+  - Risk Score: 0.165 (low — layers mostly agreed)
+  - Volatility: 0.093 (low — minimal layer disagreement)
+  - Value Score: null (correctly disabled — needs Market Intelligence)
+  - Recommendation: balanced
+✅ Per-market risk (all 3 markets have risk fields):
+  - 1X2: risk=0.165, vol=0.093, profile=balanced
+  - O/U 2.5: risk=0.165, vol=0.093, profile=high_risk
+  - BTTS: risk=0.165, vol=0.093, profile=high_risk
+✅ Risk fields persisted to DB (verified):
+  - riskScore: 0.165
+  - volatility: 0.093
+  - valueScore: null
+  - recommendationProfile: updated per market
+
+Spec Section 11 Compliance:
+- Confidence + Risk + Volatility from active layer variance ✓
+- Value Score 🟡 STUB (null until Market Intelligence) ✓
+- Recommendation profiles: Ultra Safe / Balanced / High Risk active ✓
+- High Value tier DISABLED until Market Intelligence ✓
+- Per spec: "do not fake a value bet claim" — enforced (valueScore = null) ✓
+
+What's Needed for Module 8:
+- User sign-off on Module 7
+- Module 8 (Adaptive Learning, spec Section 12) will build:
+  - Prediction logging (already partially done by Learning Intelligence in Module 4)
+  - Results comparison job (pull final scores, compute prediction_vs_actual)
+  - Accuracy measurement (per prediction, per market, per confidence tier)
+  - Per-layer performance evaluation (did each layer's signal agree with actual?)
+  - Internal learning reports (daily/weekly accuracy summaries)
+  - Dynamic weight re-adjustment is 🔴 FUTURE (needs 200+ predictions)

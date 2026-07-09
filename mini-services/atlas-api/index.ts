@@ -40,9 +40,9 @@ app.use((req, _res, next) => {
 app.get("/", (_req, res) => {
   res.json({
     service: "atlas-api",
-    version: "0.1.0-phase1-module6",
+    version: "0.1.0-phase1-module7",
     phase: 1,
-    currentModule: "module_6_explainability_engine",
+    currentModule: "module_7_risk_management",
     specVersion: "ATLAS Master Build Prompt v1.0",
     endpoints: [
       "GET  /health",
@@ -68,6 +68,7 @@ app.get("/", (_req, res) => {
       "GET  /layers/:matchId",
       "GET  /predictions/:matchId",
       "GET  /explainability/:matchId",
+      "GET  /risk/:matchId",
     ],
   });
 });

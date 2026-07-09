@@ -159,6 +159,7 @@ interface FinalMatchIntelligence {
     agreementScore: number
   } | null
   marketPredictions: MarketPrediction[]
+  riskAssessment: RiskAssessment | null
   finalPrediction: {
     market: string
     selection: string
@@ -189,6 +190,27 @@ interface MarketPrediction {
   valueScore: null
   riskScore: null
   volatility: null
+}
+
+// Module 7 — Risk Management types
+interface RiskAssessment {
+  matchId: string
+  confidence: number
+  riskScore: number
+  volatility: number
+  valueScore: null
+  valueScoreReason: string
+  recommendationProfile: string
+  reasoning: string
+  perMarketRisk: Array<{
+    marketType: string
+    selection: string
+    probability: number
+    confidence: number
+    riskScore: number
+    volatility: number
+    recommendationProfile: string
+  }>
 }
 
 // ============================================================
@@ -445,7 +467,7 @@ export default function Home() {
               <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-bold tracking-tight text-stone-900">ATLAS</h1>
                 <Badge variant="outline" className="text-xs">v1.0 · Phase 1</Badge>
-                <Badge className="bg-stone-900 text-stone-50">Module 6 / 9 — Explainability</Badge>
+                <Badge className="bg-stone-900 text-stone-50">Module 7 / 9 — Risk Management</Badge>
               </div>
               <p className="mt-1 text-sm text-stone-600">
                 Institutional Football Intelligence Platform · English Premier League · Built per Master Build Prompt v1.0
@@ -571,8 +593,9 @@ export default function Home() {
               <div className="flex justify-between"><span className="text-stone-600">Module 3 — Features</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
               <div className="flex justify-between"><span className="text-stone-600">Module 4 — 17 Layers</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
               <div className="flex justify-between"><span className="text-stone-600">Module 5 — Decision Engine</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
-              <div className="flex justify-between"><span className="text-stone-600">Module 6 — Explainability</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">current</Badge></div>
-              <div className="flex justify-between"><span className="text-stone-600">Modules 7-9</span><Badge variant="outline">queued</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Module 6 — Explainability</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Module 7 — Risk Management</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">current</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Modules 8-9</span><Badge variant="outline">queued</Badge></div>
             </CardContent>
           </Card>
         </section>
@@ -1202,6 +1225,142 @@ export default function Home() {
               </div>
             </CardContent>
           </Card>
+        </section>
+
+        {/* Module 7 — Risk Management Engine */}
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-lg font-semibold text-stone-900">Module 7 — Risk Management Engine</h2>
+              <p className="text-sm text-stone-600">
+                Spec Section 11 — Confidence + Risk + Volatility from active layer variance
+              </p>
+            </div>
+          </div>
+
+          {/* Value Score disabled notice */}
+          <Card className="mb-3 border-red-300 bg-red-50">
+            <CardContent className="py-3 text-xs text-red-900">
+              <strong>Value Score: DISABLED</strong> — Per spec Section 11: "do not fake a 'value bet' claim without
+              real market odds to compare against; that's the one output that could cause real financial harm if faked."
+              Value Score activates when Market Intelligence (Layer 8) is wired + ODDS_API_KEY is provided.
+            </CardContent>
+          </Card>
+
+          {/* Risk assessment from latest BrainOS run */}
+          {latestFmi && latestFmi.riskAssessment ? (
+            <>
+              {/* Overall risk metrics */}
+              <div className="grid gap-3 md:grid-cols-4 mb-3">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-xs font-medium text-stone-600">Confidence</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-2xl font-bold text-stone-900">{latestFmi.riskAssessment.confidence.toFixed(3)}</p>
+                    <p className="text-xs text-stone-500">from consensus</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-xs font-medium text-stone-600">Risk Score</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className={`text-2xl font-bold ${latestFmi.riskAssessment.riskScore > 0.5 ? 'text-red-700' : latestFmi.riskAssessment.riskScore > 0.3 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                      {latestFmi.riskAssessment.riskScore.toFixed(3)}
+                    </p>
+                    <p className="text-xs text-stone-500">0=low, 1=high</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-xs font-medium text-stone-600">Volatility</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className={`text-2xl font-bold ${latestFmi.riskAssessment.volatility > 0.5 ? 'text-red-700' : latestFmi.riskAssessment.volatility > 0.3 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                      {latestFmi.riskAssessment.volatility.toFixed(3)}
+                    </p>
+                    <p className="text-xs text-stone-500">layer disagreement</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-xs font-medium text-stone-600">Recommendation</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Badge
+                      className={
+                        latestFmi.riskAssessment.recommendationProfile === 'ultra_safe'
+                          ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                          : latestFmi.riskAssessment.recommendationProfile === 'balanced'
+                            ? 'bg-blue-100 text-blue-800 border-blue-200'
+                            : 'bg-red-100 text-red-800 border-red-200'
+                      }
+                    >
+                      {latestFmi.riskAssessment.recommendationProfile.replace('_', ' ').toUpperCase()}
+                    </Badge>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Per-market risk table */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Per-Market Risk Assessment</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {latestFmi.riskAssessment.perMarketRisk.map((mr) => (
+                      <div key={mr.marketType} className="rounded-md border border-stone-200 bg-white px-3 py-2">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-mono font-semibold text-sm">{mr.marketType}</span>
+                          <Badge
+                            className={
+                              mr.recommendationProfile === 'ultra_safe'
+                                ? 'bg-emerald-100 text-emerald-800 border-emerald-200 text-xs'
+                                : mr.recommendationProfile === 'balanced'
+                                  ? 'bg-blue-100 text-blue-800 border-blue-200 text-xs'
+                                  : 'bg-red-100 text-red-800 border-red-200 text-xs'
+                            }
+                          >
+                            {mr.recommendationProfile.replace('_', ' ').toUpperCase()}
+                          </Badge>
+                        </div>
+                        <div className="grid grid-cols-4 gap-2 text-xs">
+                          <div>
+                            <span className="text-stone-500">Selection:</span>
+                            <p className="font-mono font-semibold">{mr.selection.replace(/_/g, ' ')}</p>
+                          </div>
+                          <div>
+                            <span className="text-stone-500">Probability:</span>
+                            <p className="font-mono">{(mr.probability * 100).toFixed(1)}%</p>
+                          </div>
+                          <div>
+                            <span className="text-stone-500">Risk:</span>
+                            <p className={`font-mono ${mr.riskScore > 0.5 ? 'text-red-700' : mr.riskScore > 0.3 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                              {mr.riskScore.toFixed(3)}
+                            </p>
+                          </div>
+                          <div>
+                            <span className="text-stone-500">Volatility:</span>
+                            <p className={`font-mono ${mr.volatility > 0.5 ? 'text-red-700' : mr.volatility > 0.3 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                              {mr.volatility.toFixed(3)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          ) : (
+            <Card>
+              <CardContent className="py-6 text-center text-sm text-stone-500">
+                No risk assessment yet. Run BrainOS on a match to compute risk + volatility from active layer variance.
+              </CardContent>
+            </Card>
+          )}
         </section>
 
         {/* DB Tables + Recent Runs */}
