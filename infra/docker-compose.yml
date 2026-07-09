@@ -1,0 +1,61 @@
+# ATLAS — Local Docker Compose stack
+#
+# Per user clarification on Path A: "this SQLite setup is for building/testing
+# in this sandbox only — when I run ATLAS locally on my own machine with
+# Docker Compose, it should use real Postgres + Redis as originally specced."
+#
+# USAGE:
+#   1. cd infra/
+#   2. cp .env.example .env  &&  edit .env with your API keys
+#   3. docker compose up -d
+#   4. From the project root:
+#        - Edit prisma/schema.prisma: change `provider = "sqlite"` → `provider = "postgresql"`
+#        - Edit .env: set DATABASE_URL=postgresql://atlas:atlas_dev@localhost:5432/atlas
+#                     set REDIS_URL=redis://localhost:6379
+#        - Run: bun run db:push   (creates tables in Postgres)
+#        - Run: bun run dev       (dashboard on :3000)
+#        - Run: cd mini-services/atlas-api && bun run dev   (API on :4001)
+#
+# No code changes anywhere else. The same code that runs in the sandbox
+# (SQLite + ioredis-mock) runs against real Postgres + Redis in your local
+# deployment.
+
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: atlas-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: atlas
+      POSTGRES_PASSWORD: atlas_dev
+      POSTGRES_DB: atlas
+    ports:
+      - "5432:5432"
+    volumes:
+      - atlas_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atlas -d atlas"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: atlas-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - atlas_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  atlas_pg_data:
+  atlas_redis_data:

@@ -1,0 +1,412 @@
+// ATLAS — Prisma Schema (Section 14 + uniform layer contract from Section 7)
+//
+// PROVIDER NOTE: This schema is written Postgres-compatible. The sandbox dev
+// environment uses SQLite (no Docker available); production deployment on the
+// user's local machine should switch the provider to "postgresql" and point
+// DATABASE_URL at the Postgres instance from infra/docker-compose.yml.
+// No other schema changes are required for that swap.
+//
+// STATUS FLAG CONVENTION (per ATLAS Constitution Rule 2):
+//   - All ingested records carry a `sourceConfidence` field (Module 2 spec)
+//   - All "stubbed" layers/collectors still get a row with status="insufficient_data"
+//   - This is what makes Phase 2 activation a backfill job, not a migration.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // Dev sandbox: sqlite. Production (user's local Docker): postgresql.
+  // Swap is a one-line provider change + DATABASE_URL env update.
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// CORE ENTITY TABLES
+// ============================================================
+
+model Team {
+  id              String   @id @default(cuid())
+  apiFootballId   Int      @unique
+  name            String
+  shortName       String?
+  code            String? // 3-letter code e.g. "ARS"
+  city            String?
+  stadium         String?
+  capacity        Int?
+  founded         Int?
+  logoUrl         String?
+  country         String?
+  sourceConfidence Float   @default(0.8) // 0-1, lowered when data is stale or partial
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  homeMatches       Match[]      @relation("HomeMatches")
+  awayMatches       Match[]      @relation("AwayMatches")
+  players           Player[]
+  lineups           Lineup[]
+  injuries          Injury[]
+  standings         Standing[]
+  teamStats         TeamStat[]
+  h2hAsTeam1        HeadToHead[] @relation("H2H_Team1")
+  h2hAsTeam2        HeadToHead[] @relation("H2H_Team2")
+
+  @@index([name])
+  @@index([city])
+}
+
+model Player {
+  id              String   @id @default(cuid())
+  apiFootballId   Int      @unique
+  teamId          String?
+  name            String
+  firstName       String?
+  lastName        String?
+  position        String? // GK, DF, MF, FW
+  nationality     String?
+  dateOfBirth     DateTime?
+  height          String? // e.g. "180 cm"
+  weight          String? // e.g. "75 kg"
+  shirtNumber     Int?
+  photoUrl        String?
+  sourceConfidence Float   @default(0.8)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  team            Team?         @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  lineups         Lineup[]
+  injuries        Injury[]
+  playerStats     PlayerStat[]
+
+  @@index([teamId])
+  @@index([name])
+  @@index([position])
+}
+
+model Match {
+  id              String   @id @default(cuid())
+  apiFootballId   Int      @unique
+  season          Int      // e.g. 2025 for 2025-26 season
+  matchweek       Int?
+  competition     String   @default("EPL") // Phase 1 scope
+  homeTeamId      String
+  awayTeamId      String
+  kickoffUtc      DateTime
+  status          String   @default("scheduled") // scheduled | live | finished | postponed
+  homeScore       Int?
+  awayScore       Int?
+  venue           String?
+  refereeId       String?
+  sourceConfidence Float   @default(0.9)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  homeTeam        Team      @relation("HomeMatches", fields: [homeTeamId], references: [id])
+  awayTeam        Team      @relation("AwayMatches", fields: [awayTeamId], references: [id])
+  lineups         Lineup[]
+  layerOutputs    LayerOutput[]
+  predictions     Prediction[]
+  result          Result?
+
+  @@index([kickoffUtc])
+  @@index([status])
+  @@index([season, matchweek])
+  @@index([homeTeamId])
+  @@index([awayTeamId])
+}
+
+model Lineup {
+  id              String   @id @default(cuid())
+  matchId         String
+  teamId          String
+  playerId        String
+  isStarter       Boolean  @default(false)
+  position        String?  // e.g. "GK", "RB", "CM", "ST" or coordinate "X:Y"
+  shirtNumber     Int?
+  formationSlot   Int?     // 1-11 for starters
+  sourceConfidence Float   @default(0.7) // lineups are published ~1hr pre-match
+  createdAt       DateTime @default(now())
+
+  match           Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  team            Team     @relation(fields: [teamId], references: [id])
+  player          Player   @relation(fields: [playerId], references: [id])
+
+  @@unique([matchId, teamId, playerId])
+  @@index([matchId, teamId])
+}
+
+model Injury {
+  id              String   @id @default(cuid())
+  apiFootballId   Int?     @unique
+  playerId        String
+  teamId          String?
+  type            String?  // "injury", "suspension", "absent"
+  reason          String?  // e.g. "Hamstring strain"
+  status          String   @default("active") // active | recovered | returning
+  startDate       DateTime?
+  expectedReturn  DateTime?
+  sourceConfidence Float   @default(0.85)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  player          Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  team            Team?    @relation(fields: [teamId], references: [id])
+
+  @@index([playerId])
+  @@index([teamId, status])
+}
+
+model Referee {
+  id              String   @id @default(cuid())
+  apiFootballId   Int      @unique
+  name            String
+  nationality     String?
+  sourceConfidence Float   @default(0.8)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ============================================================
+// SEASON-LEVEL STATISTICAL TABLES
+// ============================================================
+
+model Standing {
+  id              String   @id @default(cuid())
+  season          Int
+  teamId          String
+  position        Int
+  played          Int      @default(0)
+  won             Int      @default(0)
+  drawn           Int      @default(0)
+  lost            Int      @default(0)
+  goalsFor        Int      @default(0)
+  goalsAgainst    Int      @default(0)
+  points          Int      @default(0)
+  form            String?  // last-5 e.g. "WWDLW"
+  homeRecord      String?  // "W-D-L" home only
+  awayRecord      String?  // "W-D-L" away only
+  sourceConfidence Float   @default(0.95)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  team            Team     @relation(fields: [teamId], references: [id])
+
+  @@unique([season, teamId])
+  @@index([season, position])
+}
+
+model TeamStat {
+  id              String   @id @default(cuid())
+  teamId          String
+  season          Int
+  fixturesPlayed  Int      @default(0)
+  wins            Int      @default(0)
+  draws           Int      @default(0)
+  losses          Int      @default(0)
+  goalsFor        Int      @default(0)
+  goalsAgainst    Int      @default(0)
+  cleanSheets     Int      @default(0)
+  failedToScore   Int      @default(0)
+  possessionAvg   Float?   // 0-100
+  shotsAvg        Float?
+  shotsOnTargetAvg Float?
+  foulsAvg        Float?
+  cornersAvg      Float?
+  yellowCards     Int      @default(0)
+  redCards        Int      @default(0)
+  // Last-5 form derived (stored for fast lookup)
+  last5GoalsFor   Int      @default(0)
+  last5GoalsAgainst Int    @default(0)
+  last5Points     Int      @default(0)
+  sourceConfidence Float   @default(0.9)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  team            Team     @relation(fields: [teamId], references: [id])
+
+  @@unique([teamId, season])
+  @@index([season])
+}
+
+model PlayerStat {
+  id              String   @id @default(cuid())
+  playerId        String
+  season          Int
+  appearances     Int      @default(0)
+  goals           Int      @default(0)
+  assists         Int      @default(0)
+  yellowCards     Int      @default(0)
+  redCards        Int      @default(0)
+  minutesPlayed   Int      @default(0)
+  rating          Float?   // API-Football player rating 0-10
+  saves           Int?     // GK only
+  cleanSheets     Int?     // GK/DF
+  shotsTotal      Int?
+  shotsOnTarget   Int?
+  passes           Int?
+  passesAccuracy  Float?
+  sourceConfidence Float   @default(0.85)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  player          Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, season])
+  @@index([season])
+}
+
+model HeadToHead {
+  id              String   @id @default(cuid())
+  team1Id         String
+  team2Id         String
+  season          Int      // last-updated season
+  matchesPlayed   Int      @default(0)
+  team1Wins       Int      @default(0)
+  draws           Int      @default(0)
+  team2Wins       Int      @default(0)
+  lastMeetingKickoff DateTime?
+  lastMeetingScore String? // "2-1"
+  sourceConfidence Float   @default(0.9)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  team1           Team     @relation("H2H_Team1", fields: [team1Id], references: [id])
+  team2           Team     @relation("H2H_Team2", fields: [team2Id], references: [id])
+
+  @@unique([team1Id, team2Id])
+}
+
+// ============================================================
+// INTELLIGENCE LAYER OUTPUTS — UNIFORM CONTRACT (Section 7)
+// ============================================================
+// One row per (layer × match). Every stubbed layer STILL gets a row with
+// status="insufficient_data" — this is what makes Phase 2 activation a
+// backfill job rather than a schema migration (Section 14, Constitution Rule 2).
+
+model LayerOutput {
+  id              String   @id @default(cuid())
+  matchId         String
+  layerName       String   // one of 17 layer names from Section 3
+  status          String   // active | insufficient_data | future
+  score           Float?   // null if status != active
+  confidence      Float?   // 0-1, null if status != active
+  reasoning       String?  // only populated for active layers
+  // Audit fields
+  computedAt      DateTime @default(now())
+  layerVersion    String   @default("1.0.0")
+  inputsHash      String?  // for reproducibility — hash of input feature vector
+  createdAt       DateTime @default(now())
+
+  match           Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, layerName])
+  @@index([layerName, status])
+  @@index([matchId, status])
+}
+
+// ============================================================
+// PREDICTIONS & LEARNING (Modules 5, 8)
+// ============================================================
+
+model Prediction {
+  id              String   @id @default(cuid())
+  matchId         String
+  marketType      String   // 1X2 | O_U | BTTS
+  selection       String   // "HOME" | "DRAW" | "AWAY" | "OVER_2_5" | "BTTS_YES" etc
+  probability     Float    // 0-1
+  confidence      Float    // 0-1
+  riskScore       Float?
+  volatility      Float?
+  valueScore      Float?   // null when Market Intelligence is 🟡
+  recommendationProfile String? // ultra_safe | balanced | high_value | high_risk
+  explainabilityText String? // Module 6 LLM output
+  consensusInputsJson String? // JSON-serialized layer contributions
+  createdAt       DateTime @default(now())
+
+  match           Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  result          Result?
+  layerPerformance LayerPerformance[]
+
+  @@index([matchId])
+  @@index([recommendationProfile])
+  @@index([createdAt])
+}
+
+model Result {
+  id              String   @id @default(cuid())
+  matchId         String   @unique
+  predictionId    String?  @unique
+  actualOutcome   String   // final outcome for the market type
+  actualScore     String?  // "2-1"
+  isCorrect       Boolean?
+  scoredAt        DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  match           Match    @relation(fields: [matchId], references: [id])
+  prediction      Prediction? @relation(fields: [predictionId], references: [id])
+
+  @@index([scoredAt])
+}
+
+model LayerPerformance {
+  id              String   @id @default(cuid())
+  predictionId    String
+  layerName       String
+  layerSignal     String?  // e.g. "HOME", "OVER_2_5"
+  actualOutcome   String?
+  agreedWithActual Boolean?
+  evaluatedAt     DateTime @default(now())
+
+  prediction      Prediction @relation(fields: [predictionId], references: [id], onDelete: Cascade)
+
+  @@unique([predictionId, layerName])
+  @@index([layerName, agreedWithActual])
+}
+
+model DailyReport {
+  id              String   @id @default(cuid())
+  reportDate      DateTime @unique
+  reportJson      String   // full structured report
+  sectionsIncluded String  // CSV: "executive_summary,match_of_day,high_conf_picks,..."
+  learningSummaryJson String? // Module 8 daily summary
+  sentViaEmail    Boolean  @default(false) // 🟡 STUB until Resend key provided
+  emailError      String?
+  createdAt       DateTime @default(now())
+
+  @@index([reportDate])
+}
+
+// ============================================================
+// OPERATIONAL TABLES — collector runs, API quota tracking
+// ============================================================
+
+model CollectorRun {
+  id              String   @id @default(cuid())
+  collectorName   String
+  status          String   // running | success | failed | insufficient_data
+  recordsIngested Int      @default(0)
+  recordsUpdated  Int      @default(0)
+  recordsSkipped  Int      @default(0)
+  error           String?
+  startedAt       DateTime @default(now())
+  finishedAt      DateTime?
+
+  @@index([collectorName, status])
+  @@index([startedAt])
+}
+
+model ApiQuotaUsage {
+  id              String   @id @default(cuid())
+  service         String   // "api-football" | "groq" | "resend" | "weather" | "odds"
+  endpoint        String?
+  dailyCount      Int      @default(0)
+  quotaLimit      Int?     // e.g. 100 for API-Football free tier
+  lastResetAt     DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([service, endpoint])
+  @@index([service, lastResetAt])
+}
