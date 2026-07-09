@@ -521,3 +521,28 @@ model CleaningReport {
   @@index([runAt])
   @@index([status])
 }
+
+// ============================================================
+// MODULE 8 — ADAPTIVE LEARNING (spec Section 12)
+// ============================================================
+
+model LearningReport {
+  id              String   @id @default(cuid())
+  reportType      String   // "daily" | "weekly"
+  reportDate      DateTime
+  status          String   // success | partial | failed | insufficient_data
+  totalPredictions    Int     @default(0)
+  correctPredictions  Int     @default(0)
+  overallAccuracy     Float?  // 0-1, null if no predictions
+  perMarketAccuracyJson  String?
+  perTierAccuracyJson    String?
+  perLayerPerformanceJson String?
+  bestPerformingLayer   String?
+  weakestPerformingLayer String?
+  sampleSizeNote        String?
+  durationMs            Int     @default(0)
+  createdAt             DateTime @default(now())
+
+  @@unique([reportType, reportDate])
+  @@index([reportType, reportDate])
+}

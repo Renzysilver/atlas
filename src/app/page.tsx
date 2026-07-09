@@ -213,6 +213,23 @@ interface RiskAssessment {
   }>
 }
 
+// Module 8 — Adaptive Learning types
+interface LearningReport {
+  id: string
+  reportType: string
+  reportDate: string
+  status: string
+  totalPredictions: number
+  correctPredictions: number
+  overallAccuracy: number | null
+  perMarketAccuracy: Record<string, { total: number; correct: number; accuracy: number }>
+  perTierAccuracy: Record<string, { total: number; correct: number; accuracy: number }>
+  perLayerPerformance: Record<string, { evaluated: number; agreed: number; accuracy: number }>
+  bestPerformingLayer: string | null
+  weakestPerformingLayer: string | null
+  sampleSizeNote: string
+}
+
 // ============================================================
 // API helpers — go through Caddy gateway via XTransformPort
 // ============================================================
@@ -291,6 +308,7 @@ export default function Home() {
   const [featureSummary, setFeatureSummary] = useState<FeatureSummary | null>(null)
   const [layerStatus, setLayerStatus] = useState<LayerStatusSummary | null>(null)
   const [latestFmi, setLatestFmi] = useState<FinalMatchIntelligence | null>(null)
+  const [learningReport, setLearningReport] = useState<LearningReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [triggeringCollector, setTriggeringCollector] = useState<string | null>(null)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
@@ -306,6 +324,7 @@ export default function Home() {
         atlasFetch<FeatureRegistry>('/features/registry').catch(() => null),
         atlasFetch<FeatureSummary>('/features').catch(() => null),
         atlasFetch<LayerStatusSummary>('/layers').catch(() => null),
+        atlasFetch<LearningReport | null>('/learning/report').catch(() => null),
       ])
       setHealth(h)
       setCollectors(c)
@@ -314,6 +333,7 @@ export default function Home() {
       setFeatureRegistry(fr)
       setFeatureSummary(fs)
       setLayerStatus(ls)
+      setLearningReport(lr)
       setLastRefresh(new Date())
     } catch (err) {
       toast.error('Failed to refresh ATLAS data', {
@@ -454,6 +474,33 @@ export default function Home() {
     }
   }
 
+  const runLearningJobs = async () => {
+    setTriggeringCollector('__learning__')
+    try {
+      const comparison = await atlasFetch<{ status: string; matchesProcessed: number; predictionsEvaluated: number; correctPredictions: number }>(
+        '/learning/run-comparison', { method: 'POST' }
+      )
+      toast.success('Results comparison complete', {
+        description: `${comparison.matchesProcessed} matches, ${comparison.predictionsEvaluated} predictions, ${comparison.correctPredictions} correct`,
+      })
+      const accuracy = await atlasFetch<{ status: string; overallAccuracy: number | null; totalPredictions: number; correctPredictions: number }>(
+        '/learning/run-accuracy', { method: 'POST' }
+      )
+      if (accuracy.overallAccuracy !== null) {
+        toast.success('Accuracy report generated', {
+          description: `${accuracy.correctPredictions}/${accuracy.totalPredictions} correct (${(accuracy.overallAccuracy * 100).toFixed(1)}%)`,
+        })
+      } else {
+        toast.info('Accuracy report generated', { description: 'No evaluated predictions yet' })
+      }
+      await refresh()
+    } catch (err) {
+      toast.error('Learning jobs failed', { description: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setTriggeringCollector(null)
+    }
+  }
+
   // ============================================================
   // Render
   // ============================================================
@@ -467,7 +514,7 @@ export default function Home() {
               <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-bold tracking-tight text-stone-900">ATLAS</h1>
                 <Badge variant="outline" className="text-xs">v1.0 · Phase 1</Badge>
-                <Badge className="bg-stone-900 text-stone-50">Module 7 / 9 — Risk Management</Badge>
+                <Badge className="bg-stone-900 text-stone-50">Module 8 / 9 — Adaptive Learning</Badge>
               </div>
               <p className="mt-1 text-sm text-stone-600">
                 Institutional Football Intelligence Platform · English Premier League · Built per Master Build Prompt v1.0
@@ -594,8 +641,9 @@ export default function Home() {
               <div className="flex justify-between"><span className="text-stone-600">Module 4 — 17 Layers</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
               <div className="flex justify-between"><span className="text-stone-600">Module 5 — Decision Engine</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
               <div className="flex justify-between"><span className="text-stone-600">Module 6 — Explainability</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
-              <div className="flex justify-between"><span className="text-stone-600">Module 7 — Risk Management</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">current</Badge></div>
-              <div className="flex justify-between"><span className="text-stone-600">Modules 8-9</span><Badge variant="outline">queued</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Module 7 — Risk Management</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Module 8 — Adaptive Learning</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">current</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Module 9 — Delivery</span><Badge variant="outline">queued</Badge></div>
             </CardContent>
           </Card>
         </section>
@@ -1369,6 +1417,83 @@ export default function Home() {
                 No risk assessment yet. Run BrainOS on a match to compute risk + volatility from active layer variance.
               </CardContent>
             </Card>
+          )}
+        </section>
+
+        {/* Module 8 — Adaptive Learning */}
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-lg font-semibold text-stone-900">Module 8 — Adaptive Learning</h2>
+              <p className="text-sm text-stone-600">Spec Section 12 — Results comparison, accuracy measurement, per-layer performance</p>
+            </div>
+            <Button size="sm" variant="outline" onClick={runLearningJobs} disabled={triggeringCollector === '__learning__'}>
+              {triggeringCollector === '__learning__' ? <RefreshCw className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+              Run learning jobs
+            </Button>
+          </div>
+
+          <Card className="mb-3 border-stone-400 bg-stone-50">
+            <CardContent className="py-3 text-xs text-stone-700">
+              <strong>Accuracy vs Consensus:</strong> This module measures <strong>actual prediction accuracy</strong> (was the prediction correct?),
+              different from Module 7's consensus metrics (did layers agree?). {learningReport?.sampleSizeNote && <span className="block mt-1 text-stone-500">{learningReport.sampleSizeNote}</span>}
+            </CardContent>
+          </Card>
+
+          {learningReport ? (
+            <>
+              <div className="grid gap-3 md:grid-cols-4 mb-3">
+                <Card><CardHeader className="pb-2"><CardTitle className="text-xs font-medium text-stone-600">Overall Accuracy</CardTitle></CardHeader>
+                  <CardContent><p className="text-2xl font-bold text-stone-900">{learningReport.overallAccuracy !== null ? `${(learningReport.overallAccuracy * 100).toFixed(1)}%` : 'N/A'}</p>
+                  <p className="text-xs text-stone-500">{learningReport.correctPredictions}/{learningReport.totalPredictions} correct</p></CardContent></Card>
+                <Card><CardHeader className="pb-2"><CardTitle className="text-xs font-medium text-stone-600">Best Layer</CardTitle></CardHeader>
+                  <CardContent><p className="text-sm font-mono font-semibold text-emerald-700">{learningReport.bestPerformingLayer || 'N/A'}</p></CardContent></Card>
+                <Card><CardHeader className="pb-2"><CardTitle className="text-xs font-medium text-stone-600">Weakest Layer</CardTitle></CardHeader>
+                  <CardContent><p className="text-sm font-mono font-semibold text-amber-700">{learningReport.weakestPerformingLayer || 'N/A'}</p></CardContent></Card>
+                <Card><CardHeader className="pb-2"><CardTitle className="text-xs font-medium text-stone-600">Report Date</CardTitle></CardHeader>
+                  <CardContent><p className="text-sm font-mono text-stone-700">{new Date(learningReport.reportDate).toLocaleDateString()}</p>
+                  <p className="text-xs text-stone-500">{learningReport.reportType}</p></CardContent></Card>
+              </div>
+
+              <Card className="mb-3"><CardHeader className="pb-2"><CardTitle className="text-sm">Per-Market Accuracy</CardTitle></CardHeader>
+                <CardContent><div className="space-y-1.5">
+                  {Object.entries(learningReport.perMarketAccuracy).map(([market, stats]) => (
+                    <div key={market} className="flex items-center justify-between rounded-md border border-stone-200 bg-white px-3 py-1.5 text-xs">
+                      <span className="font-mono font-semibold">{market}</span>
+                      <div className="flex items-center gap-3"><span className="text-stone-500">{stats.correct}/{stats.total}</span>
+                      <span className={`font-mono font-bold ${(stats.accuracy * 100) >= 50 ? 'text-emerald-700' : 'text-red-700'}`}>{(stats.accuracy * 100).toFixed(1)}%</span></div>
+                    </div>))}
+                  {Object.keys(learningReport.perMarketAccuracy).length === 0 && <p className="text-xs text-stone-500">No data yet</p>}
+                </div></CardContent></Card>
+
+              <Card className="mb-3"><CardHeader className="pb-2"><CardTitle className="text-sm">Per-Confidence-Tier Accuracy</CardTitle>
+                <CardDescription className="text-xs">Do high-consensus picks actually land more than low-consensus?</CardDescription></CardHeader>
+                <CardContent><div className="space-y-1.5">
+                  {Object.entries(learningReport.perTierAccuracy).map(([tier, stats]) => (
+                    <div key={tier} className="flex items-center justify-between rounded-md border border-stone-200 bg-white px-3 py-1.5 text-xs">
+                      <Badge className={tier === 'high_consensus' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : tier === 'moderate_consensus' ? 'bg-blue-100 text-blue-800 border-blue-200' : 'bg-red-100 text-red-800 border-red-200'}>{tier.replace(/_/g, ' ').toUpperCase()}</Badge>
+                      <div className="flex items-center gap-3"><span className="text-stone-500">{stats.correct}/{stats.total}</span>
+                      <span className={`font-mono font-bold ${(stats.accuracy * 100) >= 50 ? 'text-emerald-700' : 'text-red-700'}`}>{(stats.accuracy * 100).toFixed(1)}%</span></div>
+                    </div>))}
+                  {Object.keys(learningReport.perTierAccuracy).length === 0 && <p className="text-xs text-stone-500">No data yet</p>}
+                </div></CardContent></Card>
+
+              <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Per-Layer Performance</CardTitle>
+                <CardDescription className="text-xs">Did each layer's signal direction agree with actual?</CardDescription></CardHeader>
+                <CardContent><div className="space-y-1.5">
+                  {Object.entries(learningReport.perLayerPerformance).sort(([, a], [, b]) => b.accuracy - a.accuracy).map(([layer, stats]) => (
+                    <div key={layer} className="flex items-center justify-between rounded-md border border-stone-200 bg-white px-3 py-1.5 text-xs">
+                      <span className="font-mono font-semibold">{layer}</span>
+                      <div className="flex items-center gap-3"><span className="text-stone-500">{stats.agreed}/{stats.evaluated}</span>
+                      <span className={`font-mono font-bold ${(stats.accuracy * 100) >= 50 ? 'text-emerald-700' : 'text-red-700'}`}>{(stats.accuracy * 100).toFixed(1)}%</span></div>
+                    </div>))}
+                  {Object.keys(learningReport.perLayerPerformance).length === 0 && <p className="text-xs text-stone-500">No data yet</p>}
+                </div></CardContent></Card>
+            </>
+          ) : (
+            <Card><CardContent className="py-6 text-center text-sm text-stone-500">
+              No learning reports yet. Click "Run learning jobs" to evaluate predictions against actual results.
+            </CardContent></Card>
           )}
         </section>
 

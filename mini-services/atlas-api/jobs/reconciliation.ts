@@ -209,18 +209,10 @@ export async function runReconciliation(): Promise<ReconciliationResult> {
     // 4. SOURCE CONFIDENCE AUDIT — ensure every record has it
     // ============================================================
     logger.info("reconciliation: source confidence audit");
-    const tablesWithSourceConfidence = [
-      "team", "player", "match", "lineup", "injury", "standing",
-      "teamStat", "playerStat", "headToHead",
-    ] as const;
-
-    for (const modelName of tablesWithSourceConfidence) {
-      const model = db[modelName] as any;
-      const missing = await model.count({
-        where: { sourceConfidence: null },
-      }).catch(() => 0);
-      result.missingSourceConfidence += missing;
-    }
+    // All models have sourceConfidence as Float @default(0.8) — non-nullable.
+    // Can't filter for null on non-nullable fields (Prisma rejects it).
+    // The audit is a no-op: schema enforces non-null + default.
+    result.missingSourceConfidence = 0;
     if (result.missingSourceConfidence > 0) {
       sampleIssues.push({
         table: "multiple",

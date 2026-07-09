@@ -8,6 +8,8 @@ import { collectorRegistry } from "../collectors/registry.ts";
 import { runReconciliation } from "./reconciliation.ts";
 import { runFeatureEngineering } from "./featureEngineering.ts";
 import { runBrainOS } from "../brainos/orchestrator.ts";
+import { runResultsComparison } from "./resultsComparison.ts";
+import { runAccuracyMeasurement } from "./accuracyMeasurement.ts";
 import { db } from "../lib/db.ts";
 
 let scheduledJobs: cron.ScheduledTask[] = [];
@@ -169,9 +171,37 @@ export function startScheduler(): void {
       }
     });
     scheduledJobs.push(brainosTask);
-    logger.info("daily brainos cron scheduled", {
-      schedule: brainosCron,
-    });
+    logger.info("daily brainos cron scheduled", { schedule: brainosCron });
+  }
+
+  // Module 8: Results comparison (6 AM daily)
+  const resultsCron = process.env.RESULTS_COMPARISON_CRON || "0 6 * * *";
+  if (cron.validate(resultsCron)) {
+    scheduledJobs.push(cron.schedule(resultsCron, async () => {
+      logger.info("results comparison cron triggered");
+      try { await runResultsComparison(); } catch (err) { logger.error("results comparison failed", { error: err instanceof Error ? err.message : String(err) }); }
+    }));
+    logger.info("results comparison cron scheduled", { schedule: resultsCron });
+  }
+
+  // Module 8: Accuracy measurement (6:30 AM daily)
+  const accuracyCron = process.env.ACCURACY_MEASUREMENT_CRON || "30 6 * * *";
+  if (cron.validate(accuracyCron)) {
+    scheduledJobs.push(cron.schedule(accuracyCron, async () => {
+      logger.info("accuracy measurement cron triggered");
+      try { await runAccuracyMeasurement("daily"); } catch (err) { logger.error("accuracy measurement failed", { error: err instanceof Error ? err.message : String(err) }); }
+    }));
+    logger.info("accuracy measurement cron scheduled", { schedule: accuracyCron });
+  }
+
+  // Module 8: Weekly report (7 AM Monday)
+  const weeklyCron = process.env.WEEKLY_LEARNING_CRON || "0 7 * * 1";
+  if (cron.validate(weeklyCron)) {
+    scheduledJobs.push(cron.schedule(weeklyCron, async () => {
+      logger.info("weekly learning report cron triggered");
+      try { await runAccuracyMeasurement("weekly"); } catch (err) { logger.error("weekly report failed", { error: err instanceof Error ? err.message : String(err) }); }
+    }));
+    logger.info("weekly learning report cron scheduled", { schedule: weeklyCron });
   }
 }
 

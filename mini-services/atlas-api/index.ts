@@ -19,6 +19,7 @@ import { statsRouter } from "./routes/stats.ts";
 import { cleaningRouter } from "./routes/cleaning.ts";
 import { featuresRouter } from "./routes/features.ts";
 import { brainosRouter } from "./routes/brainos.ts";
+import { learningRouter } from "./routes/learning.ts";
 
 const PORT = parseInt(process.env.ATLAS_API_PORT || "4001", 10);
 
@@ -40,9 +41,9 @@ app.use((req, _res, next) => {
 app.get("/", (_req, res) => {
   res.json({
     service: "atlas-api",
-    version: "0.1.0-phase1-module7",
+    version: "0.1.0-phase1-module8",
     phase: 1,
-    currentModule: "module_7_risk_management",
+    currentModule: "module_8_adaptive_learning",
     specVersion: "ATLAS Master Build Prompt v1.0",
     endpoints: [
       "GET  /health",
@@ -69,6 +70,11 @@ app.get("/", (_req, res) => {
       "GET  /predictions/:matchId",
       "GET  /explainability/:matchId",
       "GET  /risk/:matchId",
+      "POST /learning/run-comparison",
+      "POST /learning/run-accuracy",
+      "GET  /learning/report",
+      "GET  /learning/reports",
+      "GET  /learning/accuracy",
     ],
   });
 });
@@ -80,7 +86,8 @@ app.use("/cleaning", cleaningRouter);
 app.use("/validation", cleaningRouter); // /validation/issues maps to cleaning router
 app.use("/features", featuresRouter);
 app.use("/brainos", brainosRouter);
-app.use("/layers", brainosRouter); // /layers maps to brainos router
+app.use("/layers", brainosRouter);
+app.use("/learning", learningRouter);
 
 // 404
 app.use((_req, res) => {
