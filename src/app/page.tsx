@@ -115,6 +115,68 @@ interface FeatureSummary {
   registry: { active: number; stub: number; total: number }
 }
 
+// Module 4 — Intelligence Engine types
+interface LayerDefinition {
+  name: string
+  layerNumber: number
+  description: string
+  buildStatus: 'active' | 'stub' | 'future'
+  feedsConsensus: boolean
+  weight: number
+}
+interface LayerStatusSummary {
+  layers: LayerDefinition[]
+  total: number
+  active: number
+  stub: number
+  future: number
+}
+interface LayerOutput {
+  layer_name: string
+  status: 'active' | 'insufficient_data' | 'future'
+  score: number | null
+  confidence: number | null
+  reasoning: string | null
+}
+interface FinalMatchIntelligence {
+  matchId: string
+  match: {
+    homeTeam: string
+    awayTeam: string
+    kickoff: string
+    venue: string | null
+    season: number
+  }
+  layerOutputs: LayerOutput[]
+  consensus: {
+    score: number
+    confidence: number | null
+    homeWinProbability: number
+    drawProbability: number
+    awayWinProbability: number
+    layersContributing: number
+    layersExcluded: number
+    agreementScore: number
+  } | null
+  finalPrediction: {
+    market: string
+    selection: string
+    probability: number
+    confidence: number
+    homeWinProb: number
+    drawProb: number
+    awayWinProb: number
+  } | null
+  metadata: {
+    computedAt: string
+    durationMs: number
+    layersActive: number
+    layersInsufficient: number
+    layersFuture: number
+    brainosVersion: string
+  }
+}
+
 // ============================================================
 // API helpers — go through Caddy gateway via XTransformPort
 // ============================================================
@@ -191,6 +253,8 @@ export default function Home() {
   const [cleaningReport, setCleaningReport] = useState<CleaningReport | null>(null)
   const [featureRegistry, setFeatureRegistry] = useState<FeatureRegistry | null>(null)
   const [featureSummary, setFeatureSummary] = useState<FeatureSummary | null>(null)
+  const [layerStatus, setLayerStatus] = useState<LayerStatusSummary | null>(null)
+  const [latestFmi, setLatestFmi] = useState<FinalMatchIntelligence | null>(null)
   const [loading, setLoading] = useState(false)
   const [triggeringCollector, setTriggeringCollector] = useState<string | null>(null)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
@@ -198,13 +262,14 @@ export default function Home() {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const [h, c, s, cr, fr, fs] = await Promise.all([
+      const [h, c, s, cr, fr, fs, ls] = await Promise.all([
         atlasFetch<HealthResponse>('/health'),
         atlasFetch<CollectorStatusResponse>('/collectors'),
         atlasFetch<DatabaseStatsResponse>('/stats'),
         atlasFetch<CleaningReport | null>('/cleaning/report').catch(() => null),
         atlasFetch<FeatureRegistry>('/features/registry').catch(() => null),
         atlasFetch<FeatureSummary>('/features').catch(() => null),
+        atlasFetch<LayerStatusSummary>('/layers').catch(() => null),
       ])
       setHealth(h)
       setCollectors(c)
@@ -212,6 +277,7 @@ export default function Home() {
       setCleaningReport(cr)
       setFeatureRegistry(fr)
       setFeatureSummary(fs)
+      setLayerStatus(ls)
       setLastRefresh(new Date())
     } catch (err) {
       toast.error('Failed to refresh ATLAS data', {
@@ -330,6 +396,28 @@ export default function Home() {
     }
   }
 
+  const runBrainOS = async (matchId: string) => {
+    setTriggeringCollector(`__brainos_${matchId}__`)
+    try {
+      const fmi = await atlasFetch<FinalMatchIntelligence>(`/brainos/run/${matchId}`, { method: 'POST' })
+      setLatestFmi(fmi)
+      if (fmi.finalPrediction) {
+        toast.success('BrainOS prediction complete', {
+          description: `${fmi.match.homeTeam} vs ${fmi.match.awayTeam}: ${fmi.finalPrediction.selection} (${(fmi.finalPrediction.probability * 100).toFixed(1)}%) — ${fmi.metadata.layersActive} active layers`,
+        })
+      } else {
+        toast.info('BrainOS ran but no consensus', {
+          description: `${fmi.metadata.layersActive} active, ${fmi.metadata.layersInsufficient} insufficient_data`,
+        })
+      }
+      await refresh()
+    } catch (err) {
+      toast.error('BrainOS run failed', { description: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setTriggeringCollector(null)
+    }
+  }
+
   // ============================================================
   // Render
   // ============================================================
@@ -343,7 +431,7 @@ export default function Home() {
               <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-bold tracking-tight text-stone-900">ATLAS</h1>
                 <Badge variant="outline" className="text-xs">v1.0 · Phase 1</Badge>
-                <Badge className="bg-stone-900 text-stone-50">Module 3 / 9 — Feature Engineering</Badge>
+                <Badge className="bg-stone-900 text-stone-50">Module 4 / 9 — Intelligence Engine</Badge>
               </div>
               <p className="mt-1 text-sm text-stone-600">
                 Institutional Football Intelligence Platform · English Premier League · Built per Master Build Prompt v1.0
@@ -466,8 +554,8 @@ export default function Home() {
             <CardContent className="space-y-1.5 text-xs">
               <div className="flex justify-between"><span className="text-stone-600">Module 1 — Data Collection</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
               <div className="flex justify-between"><span className="text-stone-600">Module 2 — Cleaning</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
-              <div className="flex justify-between"><span className="text-stone-600">Module 3 — Features</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">current</Badge></div>
-              <div className="flex justify-between"><span className="text-stone-600">Module 4 — 17 Layers</span><Badge variant="outline">queued</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Module 3 — Features</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Module 4 — 17 Layers</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">current</Badge></div>
               <div className="flex justify-between"><span className="text-stone-600">Modules 5-9</span><Badge variant="outline">queued</Badge></div>
             </CardContent>
           </Card>
@@ -834,6 +922,163 @@ export default function Home() {
                 </Card>
               ))}
             </div>
+          )}
+        </section>
+
+        {/* Module 4 — Football Intelligence Engine */}
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-lg font-semibold text-stone-900">Module 4 — Football Intelligence Engine</h2>
+              <p className="text-sm text-stone-600">
+                Spec Section 7 — 17 layers + BrainOS orchestration + Consensus Engine
+              </p>
+            </div>
+          </div>
+
+          {/* Layer status summary cards */}
+          {layerStatus && (
+            <div className="grid gap-3 md:grid-cols-4 mb-3">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-stone-600">Active Layers</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold text-emerald-700">{layerStatus.active}</p>
+                  <p className="text-xs text-stone-500">compute real scores</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-stone-600">Stub Layers</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold text-amber-700">{layerStatus.stub}</p>
+                  <p className="text-xs text-stone-500">insufficient_data (honest)</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-stone-600">Future Layers</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold text-red-700">{layerStatus.future}</p>
+                  <p className="text-xs text-stone-500">architecturally reserved</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-stone-600">Total Layers</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold text-stone-900">{layerStatus.total}</p>
+                  <p className="text-xs text-stone-500">all permanent (Rule 1)</p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* 17-layer grid */}
+          {layerStatus && (
+            <div className="grid gap-2 md:grid-cols-3 lg:grid-cols-4 mb-4">
+              {layerStatus.layers.map((layer) => (
+                <Card key={layer.name} className={`flex flex-col ${layer.buildStatus === 'stub' ? 'opacity-75' : layer.buildStatus === 'future' ? 'opacity-50' : ''}`}>
+                  <CardHeader className="pb-1 px-3 pt-3">
+                    <div className="flex items-start justify-between gap-1">
+                      <Badge variant="outline" className="text-[10px] font-mono shrink-0">L{layer.layerNumber}</Badge>
+                      {layer.buildStatus === 'active' && <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[10px]">ACTIVE</Badge>}
+                      {layer.buildStatus === 'stub' && <Badge className="bg-amber-100 text-amber-900 border-amber-200 text-[10px]">STUB</Badge>}
+                      {layer.buildStatus === 'future' && <Badge variant="destructive" className="text-[10px]">FUTURE</Badge>}
+                    </div>
+                    <CardTitle className="text-xs font-mono mt-1">{layer.name}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-3 pb-2 text-[10px] space-y-0.5">
+                    <p className="text-stone-600 leading-snug">{layer.description}</p>
+                    <div className="flex justify-between pt-1">
+                      <span className="text-stone-500">Feeds consensus:</span>
+                      <span className="font-mono">{layer.feedsConsensus ? 'yes' : 'no'}</span>
+                    </div>
+                    {layer.feedsConsensus && (
+                      <div className="flex justify-between">
+                        <span className="text-stone-500">Weight:</span>
+                        <span className="font-mono">{layer.weight.toFixed(2)}</span>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {/* BrainOS Final Match Intelligence viewer */}
+          {latestFmi && (
+            <Card className="mb-4 border-stone-400">
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  BrainOS Final Match Intelligence
+                  <Badge variant="outline" className="text-xs">{latestFmi.metadata.brainosVersion}</Badge>
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  {latestFmi.match.homeTeam} vs {latestFmi.match.awayTeam} · {new Date(latestFmi.match.kickoff).toLocaleString()} ·
+                  computed in {latestFmi.metadata.durationMs}ms · {latestFmi.metadata.layersActive} active / {latestFmi.metadata.layersInsufficient} insufficient / {latestFmi.metadata.layersFuture} future
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {/* Final prediction */}
+                {latestFmi.finalPrediction && (
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded-md border border-stone-200 bg-stone-50 p-2 text-center">
+                      <p className="text-xs text-stone-500">Home Win</p>
+                      <p className="text-lg font-bold text-stone-900">{(latestFmi.finalPrediction.homeWinProb * 100).toFixed(1)}%</p>
+                    </div>
+                    <div className="rounded-md border border-stone-200 bg-stone-50 p-2 text-center">
+                      <p className="text-xs text-stone-500">Draw</p>
+                      <p className="text-lg font-bold text-stone-900">{(latestFmi.finalPrediction.drawProb * 100).toFixed(1)}%</p>
+                    </div>
+                    <div className="rounded-md border border-stone-200 bg-stone-50 p-2 text-center">
+                      <p className="text-xs text-stone-500">Away Win</p>
+                      <p className="text-lg font-bold text-stone-900">{(latestFmi.finalPrediction.awayWinProb * 100).toFixed(1)}%</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Consensus */}
+                {latestFmi.consensus && (
+                  <div className="text-xs space-y-1">
+                    <p className="font-semibold text-stone-700">Consensus: score {latestFmi.consensus.score.toFixed(3)}, confidence {latestFmi.consensus.confidence?.toFixed(3)}</p>
+                    <p className="text-stone-500">
+                      {latestFmi.consensus.layersContributing} layers contributing · {latestFmi.consensus.layersExcluded} excluded · agreement {latestFmi.consensus.agreementScore.toFixed(3)}
+                    </p>
+                  </div>
+                )}
+
+                {/* Layer outputs with specific reasoning */}
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-stone-700">Layer Outputs ({latestFmi.layerOutputs.length}):</p>
+                  <ScrollArea className="h-[400px] pr-3">
+                    <div className="space-y-1.5">
+                      {latestFmi.layerOutputs.map((lo, i) => (
+                        <div key={i} className="rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-mono font-semibold text-stone-900">{lo.layer_name}</span>
+                            <div className="flex items-center gap-2">
+                              {lo.score !== null && <span className="font-mono text-stone-700">score: {lo.score.toFixed(3)}</span>}
+                              {lo.confidence !== null && <span className="font-mono text-stone-500">conf: {lo.confidence.toFixed(3)}</span>}
+                              {lo.status === 'active' && <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[10px]">ACTIVE</Badge>}
+                              {lo.status === 'insufficient_data' && <Badge className="bg-amber-100 text-amber-900 border-amber-200 text-[10px]">INSUF</Badge>}
+                              {lo.status === 'future' && <Badge variant="destructive" className="text-[10px]">FUTURE</Badge>}
+                            </div>
+                          </div>
+                          {lo.reasoning && (
+                            <pre className="whitespace-pre-wrap text-[10px] text-stone-600 leading-snug font-mono">{lo.reasoning}</pre>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                </div>
+              </CardContent>
+            </Card>
           )}
         </section>
 

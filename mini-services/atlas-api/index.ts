@@ -18,6 +18,7 @@ import { collectorsRouter } from "./routes/collectors.ts";
 import { statsRouter } from "./routes/stats.ts";
 import { cleaningRouter } from "./routes/cleaning.ts";
 import { featuresRouter } from "./routes/features.ts";
+import { brainosRouter } from "./routes/brainos.ts";
 
 const PORT = parseInt(process.env.ATLAS_API_PORT || "4001", 10);
 
@@ -39,9 +40,9 @@ app.use((req, _res, next) => {
 app.get("/", (_req, res) => {
   res.json({
     service: "atlas-api",
-    version: "0.1.0-phase1-module3",
+    version: "0.1.0-phase1-module4",
     phase: 1,
-    currentModule: "module_1_data_collection",
+    currentModule: "module_4_intelligence_engine",
     specVersion: "ATLAS Master Build Prompt v1.0",
     endpoints: [
       "GET  /health",
@@ -60,6 +61,11 @@ app.get("/", (_req, res) => {
       "GET  /features/registry",
       "GET  /features/team/:teamId",
       "GET  /features/match/:matchId",
+      "POST /brainos/run/:matchId",
+      "GET  /brainos/fmi/:matchId",
+      "GET  /layers",
+      "GET  /layers/registry",
+      "GET  /layers/:matchId",
     ],
   });
 });
@@ -70,6 +76,8 @@ app.use("/stats", statsRouter);
 app.use("/cleaning", cleaningRouter);
 app.use("/validation", cleaningRouter); // /validation/issues maps to cleaning router
 app.use("/features", featuresRouter);
+app.use("/brainos", brainosRouter);
+app.use("/layers", brainosRouter); // /layers maps to brainos router
 
 // 404
 app.use((_req, res) => {

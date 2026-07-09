@@ -7,6 +7,8 @@ import { logger } from "../lib/logger.ts";
 import { collectorRegistry } from "../collectors/registry.ts";
 import { runReconciliation } from "./reconciliation.ts";
 import { runFeatureEngineering } from "./featureEngineering.ts";
+import { runBrainOS } from "../brainos/orchestrator.ts";
+import { db } from "../lib/db.ts";
 
 let scheduledJobs: cron.ScheduledTask[] = [];
 
@@ -122,6 +124,53 @@ export function startScheduler(): void {
     scheduledJobs.push(featureTask);
     logger.info("daily feature engineering cron scheduled", {
       schedule: featureCron,
+    });
+  }
+
+  // Module 4: Daily BrainOS prediction job — runs AFTER feature engineering
+  // (4 AM collectors → 4:30 AM reconciliation → 5:00 AM features → 5:30 AM BrainOS)
+  // Runs BrainOS for all upcoming matches in the next 7 days.
+  const brainosCron = process.env.BRAINOS_CRON || "30 5 * * *";
+  if (cron.validate(brainosCron)) {
+    const brainosTask = cron.schedule(brainosCron, async () => {
+      logger.info("daily brainos cron triggered", { schedule: brainosCron });
+      try {
+        const now = new Date();
+        const sevenDaysLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+        const upcomingMatches = await db.match.findMany({
+          where: {
+            kickoffUtc: { gte: now, lte: sevenDaysLater },
+            status: "scheduled",
+          },
+          select: { id: true },
+        });
+        logger.info("brainos cron: processing upcoming matches", {
+          count: upcomingMatches.length,
+        });
+        let success = 0;
+        let failed = 0;
+        for (const match of upcomingMatches) {
+          try {
+            await runBrainOS(match.id);
+            success++;
+          } catch (err) {
+            logger.error("brainos cron: match failed", {
+              matchId: match.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            failed++;
+          }
+        }
+        logger.info("daily brainos completed", { success, failed });
+      } catch (err) {
+        logger.error("daily brainos failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    });
+    scheduledJobs.push(brainosTask);
+    logger.info("daily brainos cron scheduled", {
+      schedule: brainosCron,
     });
   }
 }
