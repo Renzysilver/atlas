@@ -31,7 +31,7 @@ import type { ConsensusResult } from "../layers/consensusEngine.ts";
 // ============================================================
 
 export type MarketType = "1X2" | "O_U_2_5" | "BTTS";
-export type RecommendationProfile = "ultra_safe" | "balanced" | "high_risk" | "high_value";
+export type RecommendationProfile = "high_consensus" | "moderate_consensus" | "low_consensus" | "high_value";
 
 export interface MarketPrediction {
   marketType: MarketType;
@@ -60,16 +60,22 @@ export function classifyRecommendationProfile(
   probability: number,
   confidence: number,
 ): RecommendationProfile {
-  // High Value tier is DISABLED — would need Value Score from Market Intelligence
-  // Per spec Section 11: never fake a value bet claim without real odds
+  // IMPORTANT (per Vali directive): these labels measure LAYER CONSENSUS,
+  // not prediction accuracy. A "high_consensus" prediction can still be wrong
+  // if all layers share the same blind spot. Accuracy is tracked separately
+  // by Module 8 (Learning Intelligence) after matches complete.
+  //
+  // High Value tier is DISABLED — would need Value Score from Market Intelligence.
+  // When high_value activates, its disclaimer must clarify it measures
+  // AI-vs-market disagreement, not accuracy (same category of distinction).
 
   if (confidence >= 0.75 && probability >= 0.65) {
-    return "ultra_safe";
+    return "high_consensus";
   }
   if (confidence >= 0.55 && probability >= 0.50) {
-    return "balanced";
+    return "moderate_consensus";
   }
-  return "high_risk";
+  return "low_consensus";
 }
 
 // ============================================================
@@ -125,11 +131,11 @@ function compute1X2Prediction(consensus: ConsensusResult): MarketPrediction {
     `Selection: ${selection} (${(probability * 100).toFixed(1)}%)`,
     `Confidence: ${confidence?.toFixed(3) ?? "null"}`,
     `Recommendation: ${profile}`,
-    profile === "ultra_safe"
-      ? "Ultra Safe: high confidence + high probability"
-      : profile === "balanced"
-        ? "Balanced: moderate confidence + moderate probability"
-        : "High Risk: lower confidence or probability — proceed with caution",
+    profile === "high_consensus"
+      ? "High consensus: layers strongly agreed + high confidence (NOT a guarantee of correctness)"
+      : profile === "moderate_consensus"
+        ? "Moderate consensus: moderate agreement + moderate confidence"
+        : "Low consensus: layers disagreed OR low confidence — proceed with caution",
   ].join("\n");
 
   return {

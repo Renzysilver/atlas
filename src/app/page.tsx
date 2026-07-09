@@ -1152,9 +1152,9 @@ export default function Home() {
                       {mp.recommendationProfile && (
                         <Badge
                           className={
-                            mp.recommendationProfile === 'ultra_safe'
+                            mp.recommendationProfile === 'high_consensus'
                               ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                              : mp.recommendationProfile === 'balanced'
+                              : mp.recommendationProfile === 'moderate_consensus'
                                 ? 'bg-blue-100 text-blue-800 border-blue-200'
                                 : mp.recommendationProfile === 'high_value'
                                   ? 'bg-purple-100 text-purple-800 border-purple-200'
@@ -1247,6 +1247,15 @@ export default function Home() {
             </CardContent>
           </Card>
 
+          {/* Consensus vs accuracy disclaimer */}
+          <Card className="mb-3 border-stone-400 bg-stone-50">
+            <CardContent className="py-3 text-xs text-stone-700">
+              <strong>Important:</strong> Risk, volatility, and recommendation profiles measure <strong>layer consensus</strong>, not prediction accuracy.
+              A "high consensus" prediction can still be wrong if all layers share the same blind spot. Accuracy is tracked separately
+              by Module 8 (Learning Intelligence) after matches complete.
+            </CardContent>
+          </Card>
+
           {/* Risk assessment from latest BrainOS run */}
           {latestFmi && latestFmi.riskAssessment ? (
             <>
@@ -1290,9 +1299,9 @@ export default function Home() {
                   <CardContent>
                     <Badge
                       className={
-                        latestFmi.riskAssessment.recommendationProfile === 'ultra_safe'
+                        latestFmi.riskAssessment.recommendationProfile === 'high_consensus'
                           ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                          : latestFmi.riskAssessment.recommendationProfile === 'balanced'
+                          : latestFmi.riskAssessment.recommendationProfile === 'moderate_consensus'
                             ? 'bg-blue-100 text-blue-800 border-blue-200'
                             : 'bg-red-100 text-red-800 border-red-200'
                       }
@@ -1316,9 +1325,9 @@ export default function Home() {
                           <span className="font-mono font-semibold text-sm">{mr.marketType}</span>
                           <Badge
                             className={
-                              mr.recommendationProfile === 'ultra_safe'
+                              mr.recommendationProfile === 'high_consensus'
                                 ? 'bg-emerald-100 text-emerald-800 border-emerald-200 text-xs'
-                                : mr.recommendationProfile === 'balanced'
+                                : mr.recommendationProfile === 'moderate_consensus'
                                   ? 'bg-blue-100 text-blue-800 border-blue-200 text-xs'
                                   : 'bg-red-100 text-red-800 border-red-200 text-xs'
                             }

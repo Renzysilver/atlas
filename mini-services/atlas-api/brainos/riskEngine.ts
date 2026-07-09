@@ -35,7 +35,7 @@ export interface RiskAssessment {
   volatility: number; // 0-1, higher = more layer disagreement
   valueScore: null; // ALWAYS null until Market Intelligence activates
   valueScoreReason: string; // why value score is null
-  recommendationProfile: string; // ultra_safe | balanced | high_risk (high_value disabled)
+  recommendationProfile: string; // high_consensus | moderate_consensus | low_consensus (high_value disabled)
   reasoning: string;
   perMarketRisk: Array<{
     marketType: string;
@@ -119,13 +119,16 @@ export async function runRiskEngine(
 
   let recommendationProfile: string;
   if (riskAdjustedConfidence >= 0.75 && riskScore <= 0.3) {
-    recommendationProfile = "ultra_safe";
+    recommendationProfile = "high_consensus";
   } else if (riskAdjustedConfidence >= 0.55 && riskScore <= 0.5) {
-    recommendationProfile = "balanced";
+    recommendationProfile = "moderate_consensus";
   } else {
-    recommendationProfile = "high_risk";
+    recommendationProfile = "low_consensus";
   }
-  // high_value tier would go here when Market Intelligence activates:
+  // high_value tier would go here when Market Intelligence activates.
+  // When it does, its disclaimer must clarify it measures AI-vs-market
+  // disagreement, not accuracy (per Vali directive — same category of
+  // distinction as the consensus vs accuracy separation above).
   // if (valueScore !== null && valueScore > 0.15) recommendationProfile = "high_value";
 
   // ============================================================
@@ -136,11 +139,11 @@ export async function runRiskEngine(
     const marketRiskAdjustedConfidence = mp.confidence * (1 - riskScore * 0.5);
     let marketProfile: string;
     if (marketRiskAdjustedConfidence >= 0.75 && riskScore <= 0.3) {
-      marketProfile = "ultra_safe";
+      marketProfile = "high_consensus";
     } else if (marketRiskAdjustedConfidence >= 0.55 && riskScore <= 0.5) {
-      marketProfile = "balanced";
+      marketProfile = "moderate_consensus";
     } else {
-      marketProfile = "high_risk";
+      marketProfile = "low_consensus";
     }
 
     return {
@@ -160,11 +163,11 @@ export async function runRiskEngine(
   const reasoningParts: string[] = [
     `=== RISK MANAGEMENT ENGINE (Module 7 — spec Section 11) ===`,
     ``,
-    `CONFIDENCE: ${(consensus.confidence ?? 0).toFixed(3)} (from consensus)`,
-    `RISK SCORE: ${riskScore.toFixed(3)} (0=low risk, 1=high risk)`,
-    `VOLATILITY: ${volatility.toFixed(3)} (0=high agreement, 1=high disagreement)`,
+    `CONFIDENCE: ${(consensus.confidence ?? 0).toFixed(3)} (from consensus — measures layer agreement, NOT accuracy)`,
+    `RISK SCORE: ${riskScore.toFixed(3)} (0=low, 1=high — measures layer disagreement, NOT accuracy)`,
+    `VOLATILITY: ${volatility.toFixed(3)} (0=high agreement, 1=high disagreement — NOT accuracy)`,
     `VALUE SCORE: null — ${valueScoreReason}`,
-    `RECOMMENDATION: ${recommendationProfile.toUpperCase()}`,
+    `RECOMMENDATION: ${recommendationProfile.toUpperCase()} (measures layer consensus, NOT prediction accuracy)`,
     ``,
     `RISK COMPUTATION:`,
     `  Active layers: ${activeLayers.length}`,
