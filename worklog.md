@@ -169,3 +169,118 @@ Next module (per Section 17 build order):
   zero-fill), name standardization, UTC normalization, source confidence
   flag enforcement. Will be implemented as a pre-write cleaning pass inside
   each collector's ingest() method, plus a daily reconciliation job.
+
+---
+Task ID: 1 (Module 1 — Live API Ingestion + Free-Tier Constraint Discovery)
+Agent: Zai (main, GLM)
+Task: With Vali's API-Football key configured, run all active collectors
+against real EPL data and verify the pipeline works end-to-end. Separately
+trigger injuries and referees to confirm free-tier endpoint availability.
+
+Work Log:
+- Vali provided API-Football key. Updated .env (gitignored, never committed).
+- Fixed env-loading bug: atlas-api/package.json needed --env-file=../../.env
+  because Bun loads .env from cwd only (atlas-api runs from mini-services/
+  atlas-api/ but .env is at project root).
+- Flagged Section 17 Rule 2 contradiction: API-Football free tier blocks
+  season=2025 (spec default). Only 2022-2024 available. Vali approved
+  using season=2024 for development. Updated .env + EPL_SEASON constant.
+- Flagged Section 17 Rule 2 contradiction: free tier blocks `last` and
+  `next` parameters on /fixtures endpoint. head_to_head collector uses
+  `last=20` — needs switch to date-range query. Deferred to Module 2 fix
+  (collector currently returns 0 records for historical season since no
+  upcoming fixtures exist).
+- First ingestion run revealed 3 bugs:
+  (a) Fixtures: API returns venue as object {id,name,city}, collector passed
+      it directly to String? field. Fixed: venue?.name || null.
+  (b) team_stats + player_stats: used `matches: { some: ... }` on Team model,
+      but Team has homeMatches/awayMatches, not matches. Fixed: OR filter.
+  (c) Injuries: API response structure completely different from assumed —
+      type/reason are inside player object, no status/expected_return fields.
+      Each record is a fixture-level absence, not an injury event. Rewrote
+      collector to match actual API response.
+- Second ingestion run revealed 2 more issues:
+  (a) team_stats: `s.clean.total` undefined — free-tier response omits the
+      `clean` field entirely. Fixed: defensive optional chaining (s.clean?.total ?? 0).
+      NOTE: cleanSheets will be 0 for all teams on free tier — real limitation.
+  (b) player_stats + injuries: HTTP 429 — free tier rate limit is exactly
+      10 requests per minute (confirmed by API error message). Initial 3s
+      delay was too fast (~20 req/min). Fixed: increased to 6.5s delay
+      (~9 req/min, just under the 10/min limit).
+
+Stage Summary — Live Ingestion Results:
+✅ fixtures: 380 matches ingested (full 2024-25 EPL season, Aug 2024 – May 2025)
+✅ standings: 20 teams ingested (Liverpool champions 84pts, Arsenal 2nd 74pts)
+✅ team_stats: 10/20 teams ingested (rotating strategy, 10 per run — remaining
+   10 will be fetched on next cron run. Liverpool 86 GF highest, Arsenal 34 GA
+   lowest. Clean sheets = 0 for all teams: free-tier omits this field.)
+✅ player_stats: 59 players ingested from 3 teams (rotating strategy, 3 per
+   run — full league requires ~7 runs at 3 teams/run. Top scorer: E. Eze
+   (Crystal Palace) 8 goals, 34 apps, 7.3 rating.)
+✅ injuries: 3168 absence records ingested, 403 unique players, avg 7.9
+   absences per affected player. Types: "Missing Fixture" (majority),
+   "Questionable". Top reasons: Knee Injury, Thigh Injury, Ankle Injury,
+   Muscle Injury, Hamstring Injury, Calf Injury, Groin Injury, Red Card.
+   ENDPOINT CONFIRMED WORKING ON FREE TIER.
+✅ referees: STUB — returns insufficient_data as designed. Endpoint
+   availability unconfirmed; flagged per Section 15.
+✅ head_to_head: returns 0 records (no upcoming matches for historical
+   season + `last` param blocked on free tier). Will fix in Module 2 with
+   date-range query.
+
+API-Football Free-Tier Constraints (PERMANENT — document for future reference):
+1. Season access: 2022-2024 only. Season 2025+ requires paid plan.
+   → Live/current-season prediction requires plan upgrade. Using 2024 for
+     development/backtesting. Vali will revisit plan tier when prediction
+     logic is validated.
+2. Rate limit: 10 requests per minute (confirmed via API error message).
+   → Rate limiter set to 6.5s between calls (~9 req/min). Full ingestion
+     run takes ~100s. Acceptable for daily cron; slow for interactive dev.
+3. Daily limit: 100 requests per day.
+   → Collectors use rotating strategy (10 teams/run for team_stats, 3/run
+     for player_stats) to stay within budget. Full league team_stats needs
+     2 runs (20 teams ÷ 10/run). Full league player_stats needs ~7 runs.
+4. Blocked parameters: `last` and `next` on /fixtures endpoint.
+   → head_to_head collector needs rewrite to use from=/to= date range
+     instead of last=20. Deferred to Module 2.
+5. Missing fields in /teams/statistics response: `clean` (clean sheets)
+   field absent. Defensive chaining defaults to 0.
+   → Clean sheet data not available on free tier. Module 3 (Feature
+     Engineering) will need to derive clean sheet rate from match results
+     instead of relying on team_stats endpoint.
+
+Bugs Fixed During Ingestion:
+1. Fixtures venue: object → string extraction (venue?.name)
+2. Team relation filter: matches → OR[homeMatches, awayMatches]
+3. Injuries response structure: type/reason on player object, not top-level
+4. Team_stats defensive parsing: optional chaining for all nested fields
+5. Rate limiter: 3s → 6.5s delay (10 req/min limit confirmed)
+6. Env loading: --env-file=../../.env flag added to atlas-api package.json
+
+Data Quality Observations (for Module 2 Cleaning):
+- Player names contain HTML entities (e.g. "J. O&apos;Brien" instead of
+  "J. O'Brien"). Module 2 should decode HTML entities.
+- Injury types are limited: "Missing Fixture" and "Questionable" only.
+  The `reason` field carries the actual injury type (Knee, Ankle, etc.).
+- Fixture IDs are stable across runs (upsert dedup works correctly).
+- All timestamps are UTC (API-Football returns ISO 8601 with +00:00).
+
+What's Confirmed Working:
+- Collectors → Prisma → SQLite pipeline ✓
+- Upsert deduplication on apiFootballId ✓
+- Quota tracking (DB-backed, survives restarts) ✓
+- Response caching (in-memory, TTL-based) ✓
+- Rate limiting (6.5s gap, under 10/min limit) ✓
+- Auto-mark unavailable endpoints (403 detection) ✓
+- Honest insufficient_data for stubs + expected conditions ✓
+- Dashboard renders real DB row counts ✓
+
+What's Needed for Module 2:
+- User sign-off on Module 1 (pipeline proven end-to-end with real data)
+- Module 2 will address:
+  (a) HTML entity decoding in player/team names
+  (b) head_to_head collector rewrite (date-range instead of last=N)
+  (c) Clean sheet derivation from match results (free-tier workaround)
+  (d) Name standardization across seasons
+  (e) Source confidence flag enforcement on every record
+  (f) Daily reconciliation job (dedup audit + missing value report)

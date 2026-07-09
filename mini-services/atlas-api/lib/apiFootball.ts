@@ -32,6 +32,33 @@ interface CacheEntry {
 }
 const responseCache = new Map<string, CacheEntry>();
 
+// ============================================================
+// Rate limiter — API-Football free tier has a confirmed rate limit of
+// 10 requests per minute (confirmed via live API error message:
+// "Too many requests. Your rate limit is 10 requests per minute.")
+//
+// Strategy: enforce a minimum 6.5-second gap between API calls. This gives
+// us ~9 calls/minute, just under the 10/min limit. Total daily limit is
+// still 100/day.
+//
+// This makes full ingestion slow (~100s for a 15-call run) but it's the
+// free-tier constraint. Production with a paid plan can reduce this.
+// ============================================================
+
+const MIN_GAP_BETWEEN_CALLS_MS = 6500; // 6.5 seconds → ~9 req/min (under 10/min limit)
+let lastApiCallTimestamp = 0;
+
+async function enforceRateLimit(): Promise<void> {
+  const now = Date.now();
+  const elapsed = now - lastApiCallTimestamp;
+  if (elapsed < MIN_GAP_BETWEEN_CALLS_MS) {
+    const waitMs = MIN_GAP_BETWEEN_CALLS_MS - elapsed;
+    logger.debug("api-football rate limit: waiting", { waitMs });
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+  lastApiCallTimestamp = Date.now();
+}
+
 const TTL_PRESETS = {
   fixtures: 6 * 60 * 60 * 1000,         // 6h
   standings: 12 * 60 * 60 * 1000,        // 12h
@@ -229,6 +256,9 @@ export async function apiFootball<T = unknown>(
 
   const url = `${BASE_URL}${req.path}`;
   try {
+    // Enforce per-minute rate limit (avoid HTTP 429)
+    await enforceRateLimit();
+
     const res = await fetch(url, {
       method: "GET",
       headers: {
@@ -253,11 +283,19 @@ export async function apiFootball<T = unknown>(
     }
 
     if (res.status === 429) {
+      // Rate limit hit — back off and return quota_exhausted so the caller
+      // can handle it gracefully (retry later or return insufficient_data).
+      // Wait 10 seconds before returning so the next call has a better chance.
+      logger.warn("API-Football rate limit (429) — backing off 10s", {
+        endpoint: req.endpoint,
+        path: req.path,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10000));
       return {
         ok: false,
         status: "quota_exhausted",
         data: null,
-        error: "HTTP 429 — rate limit hit.",
+        error: "HTTP 429 — rate limit hit. Backed off 10s. Try again later.",
         quotaUsedAfter,
       };
     }

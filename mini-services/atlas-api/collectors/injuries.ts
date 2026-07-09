@@ -2,10 +2,28 @@
 // 🟢 ACTIVE — but degrades to 🟡 STUB behavior if API-Football returns 403
 // on the /injuries endpoint (free tier may not include it).
 //
-// Source: API-Football GET /injuries?league=39&season=2025
+// Source: API-Football GET /injuries?league=39&season=2024
 // Per spec Section 3 Layer 4 + Section 15: if endpoint is unavailable, the
 // Injury Intelligence layer returns insufficient_data — do NOT fake injury
 // list. This collector honors that by surfacing the unavailability.
+//
+// IMPORTANT: The actual API-Football /injuries response structure is:
+//   {
+//     player: { id, name, photo, type: "Missing Fixture", reason: "Ankle Injury" },
+//     team:   { id, name, logo },
+//     fixture:{ id, timezone, date, timestamp },
+//     league: { id, season, name, country, logo, flag }
+//   }
+//
+// Note: `type` and `reason` are INSIDE the `player` object, NOT at the top
+// level. There is no `status` or `expected_return` field. Each record
+// represents a player being unavailable for a specific fixture, not an
+// injury "event" with start/return dates.
+//
+// This is actually BETTER for the Injury Intelligence layer (Section 3
+// Layer 4) — it tells us exactly which fixtures each player missed and why,
+// which is the precise input the layer needs: "injury list × player
+// importance weight" per fixture.
 
 import { db } from "../lib/db.ts";
 import { apiFootball, isEndpointAvailable } from "../lib/apiFootball.ts";
@@ -17,22 +35,24 @@ import { BaseCollector } from "./base.ts";
 const LEAGUE_ID = parseInt(process.env.API_FOOTBALL_LEAGUE_ID || String(EPL_LEAGUE_ID), 10);
 const SEASON = parseInt(process.env.API_FOOTBALL_SEASON || String(EPL_SEASON), 10);
 
+// Actual API-Football /injuries response structure (verified via live API call)
 interface ApiFootballInjuryResponse {
-  player: { id: number; name: string; photo: string };
+  player: {
+    id: number;
+    name: string;
+    photo: string;
+    type: string;   // e.g. "Missing Fixture", "Injury", "Suspension"
+    reason: string; // e.g. "Ankle Injury", "Yellow Card Accumulation"
+  };
   team: { id: number; name: string; logo: string };
-  league: { id: number; name: string; season: number };
-  fixture: { id: number | null };
-  type: string;       // "injury" | "suspension" | "absent"
-  date: string;       // ISO
-  status: string;     // "active" | "recovered" | "returning"
-  reason: string;     // e.g. "Hamstring strain"
-  expected_return: string | null; // ISO date or null
+  fixture: { id: number; timezone: string; date: string; timestamp: number } | null;
+  league: { id: number; season: number; name: string; country: string; logo: string; flag: string };
 }
 
 export class InjuriesCollector extends BaseCollector {
   readonly definition: CollectorDefinition = {
     name: "injuries",
-    description: "Active injuries & suspensions per team",
+    description: "Player absences per fixture (injuries, suspensions, missing fixture)",
     status: "active",
     feedsLayer: "injury_intelligence",
     schedule: process.env.COLLECTOR_DAILY_CRON || "0 4 * * *",
@@ -83,7 +103,7 @@ export class InjuriesCollector extends BaseCollector {
           update: { name: inj.team.name, logoUrl: inj.team.logo },
         });
 
-        // Ensure player exists
+        // Ensure player exists — note: type/reason are on the player object
         const player = await db.player.upsert({
           where: { apiFootballId: inj.player.id },
           create: {
@@ -100,41 +120,46 @@ export class InjuriesCollector extends BaseCollector {
           },
         });
 
-        // Status mapping (API-Football: "active" | "recovered" | "returning")
-        const status = ["active", "recovered", "returning"].includes(inj.status)
-          ? inj.status
-          : "active";
+        // The API returns fixture-level absence records. Each record = "this
+        // player missed this fixture for this reason." We store one Injury
+        // row per (player, fixture, reason) combination.
+        //
+        // Map API fields to our schema:
+        //   player.type  → type   ("Missing Fixture", "Injury", "Suspension")
+        //   player.reason → reason ("Ankle Injury", "Yellow Cards", etc.)
+        //   fixture.date  → startDate (the date of the fixture missed)
+        //   status        → "active" (all records are historical absences)
+        //   expectedReturn → null (not provided by this endpoint)
 
-        const expectedReturn = inj.expected_return ? new Date(inj.expected_return) : null;
+        const injuryType = inj.player.type || "Unknown";
+        const injuryReason = inj.player.reason || "Unknown";
+        const fixtureDate = inj.fixture?.date ? new Date(inj.fixture.date) : null;
 
+        // Dedup key: (player, fixture, reason) — if the same player missed
+        // the same fixture for the same reason, it's a duplicate record.
+        // We use (playerId, type, reason, startDate) as the lookup since
+        // we don't store fixtureId on the Injury model yet.
         const existing = await db.injury.findFirst({
           where: {
             playerId: player.id,
-            type: inj.type,
-            reason: inj.reason,
-            startDate: new Date(inj.date),
+            type: injuryType,
+            reason: injuryReason,
+            startDate: fixtureDate,
           },
         });
 
         if (existing) {
-          await db.injury.update({
-            where: { id: existing.id },
-            data: {
-              status,
-              expectedReturn: expectedReturn ?? undefined,
-            },
-          });
-          updated++;
+          // Already have this absence recorded — skip (not an error)
+          skipped++;
         } else {
           await db.injury.create({
             data: {
               playerId: player.id,
               teamId: team.id,
-              type: inj.type,
-              reason: inj.reason,
-              status,
-              startDate: new Date(inj.date),
-              expectedReturn: expectedReturn ?? undefined,
+              type: injuryType,
+              reason: injuryReason,
+              status: "active",
+              startDate: fixtureDate,
               sourceConfidence: 0.85,
             },
           });
@@ -143,6 +168,7 @@ export class InjuriesCollector extends BaseCollector {
       } catch (err) {
         logger.warn("injury upsert failed", {
           apiFootballId: inj.player.id,
+          playerName: inj.player.name,
           error: err instanceof Error ? err.message : String(err),
         });
         skipped++;

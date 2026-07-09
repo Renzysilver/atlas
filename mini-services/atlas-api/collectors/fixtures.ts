@@ -103,14 +103,14 @@ export class FixturesCollector extends BaseCollector {
             status: matchStatus,
             homeScore: fx.goals.home,
             awayScore: fx.goals.away,
-            venue: fx.fixture.venue,
+            venue: fx.fixture.venue?.name || null,
             sourceConfidence: 0.9,
           },
           update: {
             status: matchStatus,
             homeScore: fx.goals.home,
             awayScore: fx.goals.away,
-            venue: fx.fixture.venue,
+            venue: fx.fixture.venue?.name || null,
             matchweek: matchweek ?? undefined,
           },
         });

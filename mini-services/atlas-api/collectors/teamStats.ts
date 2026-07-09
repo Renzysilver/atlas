@@ -47,9 +47,15 @@ export class TeamStatsCollector extends BaseCollector {
     // On free tier, we CANNOT fetch all 20 teams in one cron run — that's 20
     // of our 100 daily requests. Strategy: fetch up to 10 per run, rotating
     // through teams. This stays within quota.
+    //
+    // Note: Team model has homeMatches/awayMatches relations, not a unified
+    // `matches` relation. Query both via OR.
     const teamsNeedingStats = await db.team.findMany({
       where: {
-        matches: { some: { competition: "EPL", season: SEASON } },
+        OR: [
+          { homeMatches: { some: { competition: "EPL", season: SEASON } } },
+          { awayMatches: { some: { competition: "EPL", season: SEASON } } },
+        ],
       },
       orderBy: { updatedAt: "asc" }, // oldest-updated first
       take: 10, // conservative cap per run
@@ -94,40 +100,42 @@ export class TeamStatsCollector extends BaseCollector {
           if (c === "W") last5Points += 3;
           else if (c === "D") last5Points += 1;
         }
-        const last5GoalsFor = s.goals.for.total?.total ?? 0; // not strictly last-5 but used as proxy
-        const last5GoalsAgainst = s.goals.against.total?.total ?? 0;
+        // Defensive access — free-tier response may omit some nested fields.
+        // Use optional chaining + nullish coalescing for every field.
+        const last5GoalsFor = s.goals?.for?.total?.total ?? 0;
+        const last5GoalsAgainst = s.goals?.against?.total?.total ?? 0;
 
         await db.teamStat.upsert({
           where: { teamId_season: { teamId: team.id, season: SEASON } },
           create: {
             teamId: team.id,
             season: SEASON,
-            fixturesPlayed: s.fixtures.played.total,
-            wins: s.fixtures.wins.total,
-            draws: s.fixtures.draws.total,
-            losses: s.fixtures.loses.total,
-            goalsFor: s.goals.for.total?.total ?? 0,
-            goalsAgainst: s.goals.against.total?.total ?? 0,
-            cleanSheets: s.clean.total,
-            failedToScore: s.failed_to_score.total,
-            yellowCards: s.cards.yellow.total ?? 0,
-            redCards: s.cards.red.total ?? 0,
+            fixturesPlayed: s.fixtures?.played?.total ?? 0,
+            wins: s.fixtures?.wins?.total ?? 0,
+            draws: s.fixtures?.draws?.total ?? 0,
+            losses: s.fixtures?.loses?.total ?? 0,
+            goalsFor: s.goals?.for?.total?.total ?? 0,
+            goalsAgainst: s.goals?.against?.total?.total ?? 0,
+            cleanSheets: s.clean?.total ?? 0,
+            failedToScore: s.failed_to_score?.total ?? 0,
+            yellowCards: s.cards?.yellow?.total ?? 0,
+            redCards: s.cards?.red?.total ?? 0,
             last5Points,
             last5GoalsFor,
             last5GoalsAgainst,
             sourceConfidence: 0.9,
           },
           update: {
-            fixturesPlayed: s.fixtures.played.total,
-            wins: s.fixtures.wins.total,
-            draws: s.fixtures.draws.total,
-            losses: s.fixtures.loses.total,
-            goalsFor: s.goals.for.total?.total ?? 0,
-            goalsAgainst: s.goals.against.total?.total ?? 0,
-            cleanSheets: s.clean.total,
-            failedToScore: s.failed_to_score.total,
-            yellowCards: s.cards.yellow.total ?? 0,
-            redCards: s.cards.red.total ?? 0,
+            fixturesPlayed: s.fixtures?.played?.total ?? 0,
+            wins: s.fixtures?.wins?.total ?? 0,
+            draws: s.fixtures?.draws?.total ?? 0,
+            losses: s.fixtures?.loses?.total ?? 0,
+            goalsFor: s.goals?.for?.total?.total ?? 0,
+            goalsAgainst: s.goals?.against?.total?.total ?? 0,
+            cleanSheets: s.clean?.total ?? 0,
+            failedToScore: s.failed_to_score?.total ?? 0,
+            yellowCards: s.cards?.yellow?.total ?? 0,
+            redCards: s.cards?.red?.total ?? 0,
             last5Points,
             last5GoalsFor,
             last5GoalsAgainst,

@@ -99,7 +99,7 @@ export interface ApiFootballFixture {
     id: number;
     date: string; // ISO 8601
     status: { short: string; long: string };
-    venue: string;
+    venue: { id: number; name: string; city: string } | null;
     referee: string | null;
   };
   league: {
@@ -135,4 +135,4 @@ export interface ApiFootballStandingRow {
 // ============================================================
 
 export const EPL_LEAGUE_ID = 39;
-export const EPL_SEASON = 2025; // 2025-26 season
+export const EPL_SEASON = 2024; // 2025-26 season

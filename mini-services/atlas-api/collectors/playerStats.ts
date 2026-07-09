@@ -55,9 +55,14 @@ export class PlayerStatsCollector extends BaseCollector {
     const LEAGUE_ID = parseInt(process.env.API_FOOTBALL_LEAGUE_ID || "39", 10);
 
     // Pick 3 teams with oldest player-stats update
+    // Note: Team model has homeMatches/awayMatches relations, not a unified
+    // `matches` relation. Query both via OR.
     const teamsNeedingPlayers = await db.team.findMany({
       where: {
-        matches: { some: { competition: "EPL", season: SEASON } },
+        OR: [
+          { homeMatches: { some: { competition: "EPL", season: SEASON } } },
+          { awayMatches: { some: { competition: "EPL", season: SEASON } } },
+        ],
       },
       orderBy: { updatedAt: "asc" },
       take: 3,
