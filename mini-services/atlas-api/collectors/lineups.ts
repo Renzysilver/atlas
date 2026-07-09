@@ -10,6 +10,7 @@ import { apiFootball } from "../lib/apiFootball.ts";
 import { logger } from "../lib/logger.ts";
 import type { CollectorDefinition, CollectorRunResult } from "@atlas/shared";
 import { BaseCollector } from "./base.ts";
+import { normalizeName, validateSourceConfidence } from "../lib/cleaning.ts";
 
 interface ApiFootballLineupResponse {
   team: {
@@ -149,16 +150,18 @@ export class LineupsCollector extends BaseCollector {
     formationSlot: number | null,
   ): Promise<void> {
     // Ensure player exists
+    // Module 2: normalize player name (decode HTML entities)
+    const playerName = normalizeName(playerRef.name) || playerRef.name;
     const player = await db.player.upsert({
       where: { apiFootballId: playerRef.id },
       create: {
         apiFootballId: playerRef.id,
         teamId,
-        name: playerRef.name,
-        sourceConfidence: 0.6, // minimal — player_stats collector enriches
+        name: playerName,
+        sourceConfidence: validateSourceConfidence(0.6),
       },
       update: {
-        name: playerRef.name,
+        name: playerName,
         teamId,
       },
     });

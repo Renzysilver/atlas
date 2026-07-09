@@ -5,6 +5,7 @@
 import cron from "node-cron";
 import { logger } from "../lib/logger.ts";
 import { collectorRegistry } from "../collectors/registry.ts";
+import { runReconciliation } from "./reconciliation.ts";
 
 let scheduledJobs: cron.ScheduledTask[] = [];
 
@@ -63,6 +64,33 @@ export function startScheduler(): void {
     scheduledJobs.push(dailyTask);
     logger.info("daily report cron scheduled (no-op until Module 9)", {
       schedule: dailyReportCron,
+    });
+  }
+
+  // Module 2: Daily reconciliation job — runs AFTER the daily collector cron
+  // (4 AM collectors → 4:30 AM reconciliation) so it audits freshly-ingested data.
+  // Per spec Section 5: dedup audit, missing value report, source confidence audit.
+  const reconciliationCron = process.env.RECONCILIATION_CRON || "30 4 * * *";
+  if (cron.validate(reconciliationCron)) {
+    const reconciliationTask = cron.schedule(reconciliationCron, async () => {
+      logger.info("daily reconciliation cron triggered", { schedule: reconciliationCron });
+      try {
+        const result = await runReconciliation();
+        logger.info("daily reconciliation completed", {
+          status: result.status,
+          durationMs: result.durationMs,
+          issues: result.sampleIssues.length,
+          cleanSheetsDerived: result.cleanSheetsDerived,
+        });
+      } catch (err) {
+        logger.error("daily reconciliation failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    });
+    scheduledJobs.push(reconciliationTask);
+    logger.info("daily reconciliation cron scheduled", {
+      schedule: reconciliationCron,
     });
   }
 }

@@ -12,6 +12,7 @@ import { logger } from "../lib/logger.ts";
 import { EPL_SEASON } from "@atlas/shared";
 import type { CollectorDefinition, CollectorRunResult } from "@atlas/shared";
 import { BaseCollector } from "./base.ts";
+import { normalizeName, validateStat, validateSourceConfidence } from "../lib/cleaning.ts";
 
 const SEASON = parseInt(process.env.API_FOOTBALL_SEASON || String(EPL_SEASON), 10);
 
@@ -108,31 +109,32 @@ export class PlayerStatsCollector extends BaseCollector {
               create: {
                 apiFootballId: p.player.id,
                 teamId: team.id,
-                name: p.player.name,
-                firstName: p.player.firstname,
-                lastName: p.player.lastname,
-                nationality: p.player.nationality,
-                height: p.player.height,
-                weight: p.player.weight,
+                // Module 2: normalize name (decode HTML entities like &apos;)
+                name: normalizeName(p.player.name) || p.player.name,
+                firstName: normalizeName(p.player.firstname) || undefined,
+                lastName: normalizeName(p.player.lastname) || undefined,
+                nationality: normalizeName(p.player.nationality) || undefined,
+                height: p.player.height || undefined,
+                weight: p.player.weight || undefined,
                 photoUrl: p.player.photo,
-                sourceConfidence: 0.85,
+                sourceConfidence: validateSourceConfidence(0.85),
               },
               update: {
                 teamId: team.id,
-                name: p.player.name,
-                firstName: p.player.firstname,
-                lastName: p.player.lastname,
-                nationality: p.player.nationality,
-                height: p.player.height,
-                weight: p.player.weight,
+                name: normalizeName(p.player.name) || p.player.name,
+                firstName: normalizeName(p.player.firstname) || undefined,
+                lastName: normalizeName(p.player.lastname) || undefined,
+                nationality: normalizeName(p.player.nationality) || undefined,
+                height: p.player.height || undefined,
+                weight: p.player.weight || undefined,
                 photoUrl: p.player.photo,
               },
             });
 
-            const rating = eplStats.games.rating ? parseFloat(eplStats.games.rating) : null;
-            const passesAccuracy = eplStats.passes.accuracy
-              ? parseFloat(eplStats.passes.accuracy)
-              : null;
+            const rating = validateStat(eplStats.games.rating ? parseFloat(eplStats.games.rating) : null);
+            const passesAccuracy = validateStat(
+              eplStats.passes.accuracy ? parseFloat(eplStats.passes.accuracy) : null
+            );
 
             const existingStat = await db.playerStat.findUnique({
               where: { playerId_season: { playerId: player.id, season: SEASON } },

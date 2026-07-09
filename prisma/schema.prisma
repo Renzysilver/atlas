@@ -207,8 +207,11 @@ model TeamStat {
   losses          Int      @default(0)
   goalsFor        Int      @default(0)
   goalsAgainst    Int      @default(0)
-  cleanSheets     Int      @default(0)
-  failedToScore   Int      @default(0)
+  // Per spec Section 5: "explicit null, never silently zero-fill a stat"
+  // These fields may be missing on the free tier — MUST be nullable so we
+  // can store null instead of 0 when the API doesn't return them.
+  cleanSheets     Int?     // null when free-tier API omits the field
+  failedToScore   Int?     // null when free-tier API omits the field
   possessionAvg   Float?   // 0-100
   shotsAvg        Float?
   shotsOnTargetAvg Float?
@@ -216,10 +219,13 @@ model TeamStat {
   cornersAvg      Float?
   yellowCards     Int      @default(0)
   redCards        Int      @default(0)
-  // Last-5 form derived (stored for fast lookup)
-  last5GoalsFor   Int      @default(0)
-  last5GoalsAgainst Int    @default(0)
-  last5Points     Int      @default(0)
+  // Last-5 form derived (stored for fast lookup) — nullable per spec S.5
+  // (explicit null when form data not available, e.g. early in season)
+  last5GoalsFor   Int?
+  last5GoalsAgainst Int?
+  last5Points     Int?
+  // Derived fields (computed by Module 2 jobs, not from API directly)
+  cleanSheetsDerived Int?   // computed from match results (free-tier workaround)
   sourceConfidence Float   @default(0.9)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -409,4 +415,44 @@ model ApiQuotaUsage {
 
   @@unique([service, endpoint])
   @@index([service, lastResetAt])
+}
+
+// ============================================================
+// MODULE 2 — CLEANING & VALIDATION REPORTS (spec Section 5)
+// ============================================================
+// One row per reconciliation run. Stores the full audit results as JSON
+// so the dashboard can render historical trends without recomputing.
+
+model CleaningReport {
+  id              String   @id @default(cuid())
+  runAt           DateTime @default(now())
+  status          String   // success | failed | partial
+  durationMs      Int
+
+  // Audit counts (what was found)
+  totalRecordsAudited Int   @default(0)
+  duplicateFixtures   Int   @default(0)  // should always be 0 (upsert dedup)
+  missingSourceConfidence Int @default(0) // records without sourceConfidence
+  nullStats           Int   @default(0)  // explicit nulls (correct per spec)
+  zeroFilledStats     Int   @default(0)  // 0 where should be null (spec violation)
+  htmlEntityNames     Int   @default(0)  // names with undecoded HTML entities
+  orphanedForeignKeys Int   @default(0)  // FK pointing to non-existent record
+  invalidTimestamps   Int   @default(0)  // non-UTC or unparseable timestamps
+
+  // Per-table breakdown
+  tableReportsJson String  // JSON: { [tableName]: { rows, issues, ... } }
+
+  // Sample issues (first 50 of each type, for dashboard display)
+  sampleIssuesJson  String  // JSON: [{ table, field, issue, recordId, message }]
+
+  // Actions taken (what was fixed)
+  namesDecoded      Int   @default(0)  // HTML entities decoded
+  namesNormalized   Int   @default(0)  // whitespace/case normalized
+  zeroFilledToNull  Int   @default(0)  // 0 → null conversions
+  cleanSheetsDerived Int  @default(0)  // clean sheets computed from match results
+
+  createdAt         DateTime @default(now())
+
+  @@index([runAt])
+  @@index([status])
 }

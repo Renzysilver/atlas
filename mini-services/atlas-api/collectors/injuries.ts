@@ -31,6 +31,7 @@ import { logger } from "../lib/logger.ts";
 import { EPL_LEAGUE_ID, EPL_SEASON } from "@atlas/shared";
 import type { CollectorDefinition, CollectorRunResult } from "@atlas/shared";
 import { BaseCollector } from "./base.ts";
+import { normalizeName, normalizeTimestampToUtc, validateSourceConfidence } from "../lib/cleaning.ts";
 
 const LEAGUE_ID = parseInt(process.env.API_FOOTBALL_LEAGUE_ID || String(EPL_LEAGUE_ID), 10);
 const SEASON = parseInt(process.env.API_FOOTBALL_SEASON || String(EPL_SEASON), 10);
@@ -92,30 +93,34 @@ export class InjuriesCollector extends BaseCollector {
     for (const inj of res.data) {
       try {
         // Ensure team exists
+        // Module 2: normalize team name (decode HTML entities)
+        const teamName = normalizeName(inj.team.name) || inj.team.name;
         const team = await db.team.upsert({
           where: { apiFootballId: inj.team.id },
           create: {
             apiFootballId: inj.team.id,
-            name: inj.team.name,
+            name: teamName,
             logoUrl: inj.team.logo,
-            sourceConfidence: 0.6,
+            sourceConfidence: validateSourceConfidence(0.6),
           },
-          update: { name: inj.team.name, logoUrl: inj.team.logo },
+          update: { name: teamName, logoUrl: inj.team.logo },
         });
 
         // Ensure player exists — note: type/reason are on the player object
+        // Module 2: normalize player name (decode HTML entities like &apos;)
+        const playerName = normalizeName(inj.player.name) || inj.player.name;
         const player = await db.player.upsert({
           where: { apiFootballId: inj.player.id },
           create: {
             apiFootballId: inj.player.id,
             teamId: team.id,
-            name: inj.player.name,
+            name: playerName,
             photoUrl: inj.player.photo,
-            sourceConfidence: 0.6,
+            sourceConfidence: validateSourceConfidence(0.6),
           },
           update: {
             teamId: team.id,
-            name: inj.player.name,
+            name: playerName,
             photoUrl: inj.player.photo,
           },
         });
@@ -131,9 +136,10 @@ export class InjuriesCollector extends BaseCollector {
         //   status        → "active" (all records are historical absences)
         //   expectedReturn → null (not provided by this endpoint)
 
-        const injuryType = inj.player.type || "Unknown";
-        const injuryReason = inj.player.reason || "Unknown";
-        const fixtureDate = inj.fixture?.date ? new Date(inj.fixture.date) : null;
+        const injuryType = normalizeName(inj.player.type) || "Unknown";
+        const injuryReason = normalizeName(inj.player.reason) || "Unknown";
+        // Module 2: normalize fixture date to UTC
+        const fixtureDate = normalizeTimestampToUtc(inj.fixture?.date);
 
         // Dedup key: (player, fixture, reason) — if the same player missed
         // the same fixture for the same reason, it's a duplicate record.
@@ -160,7 +166,7 @@ export class InjuriesCollector extends BaseCollector {
               reason: injuryReason,
               status: "active",
               startDate: fixtureDate,
-              sourceConfidence: 0.85,
+              sourceConfidence: validateSourceConfidence(0.85),
             },
           });
           ingested++;

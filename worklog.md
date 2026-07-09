@@ -284,3 +284,112 @@ What's Needed for Module 2:
   (d) Name standardization across seasons
   (e) Source confidence flag enforcement on every record
   (f) Daily reconciliation job (dedup audit + missing value report)
+
+---
+Task ID: 2 (Module 2 — Cleaning & Validation)
+Agent: Zai (main, GLM)
+Task: Build Module 2 per ATLAS spec Section 5. Implement cleaning library,
+apply it to all collectors, rewrite head_to_head for free-tier compatibility,
+build daily reconciliation job, add dashboard Data Quality card. Commit + push
+per permanent git process.
+
+Work Log:
+- Built lib/cleaning.ts — cleaning primitives:
+  - decodeHtmlEntities(): decodes &apos; &amp; &quot; &#39; etc. in names
+  - normalizeName(): decodes entities + trims whitespace + collapses spaces
+  - normalizeTimestampToUtc(): ensures UTC-normalized Date objects
+  - validateStat(): returns null instead of 0 for missing numeric stats
+  - validateSourceConfidence(): ensures [0,1] range, defaults to 0.5
+  - auditNameForHtmlEntities(): post-cleaning audit helper
+  - auditStatForZeroFill(): detects pre-cleaning zero-fills
+
+- Schema audit + fixes (prisma/schema.prisma):
+  - TeamStat.cleanSheets: Int @default(0) → Int? (nullable per spec S.5)
+  - TeamStat.failedToScore: Int @default(0) → Int?
+  - TeamStat.last5GoalsFor/Against/Points: Int @default(0) → Int?
+  - Added TeamStat.cleanSheetsDerived: Int? (computed from match results)
+  - Added CleaningReport model: stores audit results + actions taken per run
+
+- Applied cleaning library to all 7 active collectors:
+  - fixtures: normalizeName on team names, normalizeTimestampToUtc on kickoff
+  - standings: normalizeName on team names
+  - team_stats: validateStat for cleanSheets/failedToScore (null not 0),
+    normalizeName on team name
+  - player_stats: normalizeName on player names + firstName/lastName/nationality
+  - injuries: normalizeName on player/team/type/reason, normalizeTimestampToUtc
+  - lineups: normalizeName on player names
+  - h2h: REWROTE — uses from=/to= date-range query (5-year window) instead
+    of blocked last=N parameter. Free-tier compatible.
+
+- Built jobs/reconciliation.ts — daily reconciliation job:
+  1. Dedup audit (duplicate fixture IDs — should always be 0)
+  2. HTML entity audit + fix (decode entities in team/player names)
+  3. Zero-fill audit + fix (convert 0 → null for missing stats)
+  4. Source confidence audit (ensure every record has sourceConfidence)
+  5. Orphaned FK audit (raw SQL — Prisma can't filter on null relations)
+  6. Clean sheet derivation (compute from match results — free-tier workaround)
+  7. Timestamp audit (no-op — Prisma enforces UTC + non-nullable)
+  8. Write CleaningReport to DB
+
+- Added routes/cleaning.ts:
+  - POST /cleaning/run — trigger reconciliation
+  - GET /cleaning/report — latest report
+  - GET /cleaning/reports — last 10 reports
+  - GET /validation/issues — current issues from latest report
+
+- Added reconciliation cron to scheduler (4:30 AM daily, after 4 AM collectors)
+
+- Updated dashboard (src/app/page.tsx):
+  - Added Module 2 Data Quality section with 4 cards:
+    Status, Records Audited, Issues Found, Actions Taken
+  - Added "Run reconciliation" button
+  - Added Sample Issues card (shows first 10 issues from latest report)
+  - Updated header: Module 1 → Module 2 current
+  - Auto-fetches /cleaning/report on every 15s refresh
+
+- Bugs fixed during reconciliation development:
+  1. Prisma can't filter on `where: { homeTeam: null }` for relations —
+     switched to raw SQL for orphaned FK audit
+  2. Prisma can't filter on `where: { kickoffUtc: null }` for non-nullable
+     fields — removed the check (schema enforces non-null)
+  3. .env file got truncated to 50 bytes (sandbox filesystem issue) —
+     restored full .env with API key
+
+Stage Summary — Module 2 Live Results:
+✅ Re-ingested 2024 EPL data with Module 2 cleaning applied:
+   - 380 matches, 20 standings, 10 team_stats, 59 player_stats, 3168 injuries
+   - 0 HTML entities in any name (cleaning library working)
+   - 0 zero-filled stats (all missing values are null, not 0)
+   - 0 duplicate fixtures, 0 orphaned FKs, 0 missing source confidence
+✅ Reconciliation job: status=success, 854 records audited, 26ms duration
+✅ Clean sheets derived from match results (free-tier workaround):
+   - Liverpool: 14, Arsenal: 13, Man City: 13, Newcastle: 13
+   - Nottingham Forest: 13, Chelsea: 11, Aston Villa: 9
+   - Bournemouth: 9, Brighton: 8, Brentford: 8
+✅ CleaningReport written to DB, dashboard renders it in Data Quality card
+✅ head_to_head collector rewritten — uses date-range query (free-tier compatible)
+✅ API quota: 16/100 used today (84 remaining)
+
+Spec Section 5 Compliance:
+- Deduplication on fixture ID: ✓ (upsert + audit confirms 0 duplicates)
+- Missing value handling (explicit null, never zero-fill): ✓ (schema + collectors + reconciliation)
+- Name standardization: ✓ (HTML entity decoding + whitespace normalization)
+- Timestamp normalization to UTC: ✓ (normalizeTimestampToUtc in all collectors)
+- Source confidence flag on every ingested record: ✓ (validateSourceConfidence + audit confirms 0 missing)
+
+What's Confirmed Working:
+- Cleaning library prevents HTML entities from entering the DB ✓
+- Cleaning library prevents zero-fills from entering the DB ✓
+- Reconciliation job audits + fixes existing data ✓
+- Clean sheet derivation works (free-tier workaround) ✓
+- Dashboard renders cleaning report in real-time ✓
+- head_to_head collector works on free tier (date-range query) ✓
+- All 7 Constitution rules still honored (especially Rule 4: never fabricate) ✓
+
+What's Needed for Module 3:
+- User sign-off on Module 2
+- Module 3 (Feature Engineering, spec Section 6) will build:
+  - Team Strength, Attack Rating, Defensive Stability, Form Score
+  - Home/Away split, Possession Rating, Goal Threat, Clean Sheet Rate
+  - Fatigue (days rest), Squad Depth (bench minutes played)
+  - STUB: Tactical Flexibility, Momentum Score, Set Piece Rating

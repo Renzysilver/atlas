@@ -74,6 +74,28 @@ interface DatabaseStatsResponse {
   }
 }
 
+// Module 2 — Cleaning & Validation types
+interface CleaningReport {
+  id: string
+  runAt: string
+  status: 'success' | 'partial' | 'failed'
+  durationMs: number
+  totalRecordsAudited: number
+  duplicateFixtures: number
+  missingSourceConfidence: number
+  nullStats: number
+  zeroFilledStats: number
+  htmlEntityNames: number
+  orphanedForeignKeys: number
+  invalidTimestamps: number
+  tableReports: Record<string, { rows: number; issues: number }>
+  sampleIssues: Array<{ table: string; field: string; issue: string; recordId: string; message: string }>
+  namesDecoded: number
+  namesNormalized: number
+  zeroFilledToNull: number
+  cleanSheetsDerived: number
+}
+
 // ============================================================
 // API helpers — go through Caddy gateway via XTransformPort
 // ============================================================
@@ -147,6 +169,7 @@ export default function Home() {
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [collectors, setCollectors] = useState<CollectorStatusResponse | null>(null)
   const [stats, setStats] = useState<DatabaseStatsResponse | null>(null)
+  const [cleaningReport, setCleaningReport] = useState<CleaningReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [triggeringCollector, setTriggeringCollector] = useState<string | null>(null)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
@@ -154,14 +177,16 @@ export default function Home() {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const [h, c, s] = await Promise.all([
+      const [h, c, s, cr] = await Promise.all([
         atlasFetch<HealthResponse>('/health'),
         atlasFetch<CollectorStatusResponse>('/collectors'),
         atlasFetch<DatabaseStatsResponse>('/stats'),
+        atlasFetch<CleaningReport | null>('/cleaning/report').catch(() => null),
       ])
       setHealth(h)
       setCollectors(c)
       setStats(s)
+      setCleaningReport(cr)
       setLastRefresh(new Date())
     } catch (err) {
       toast.error('Failed to refresh ATLAS data', {
@@ -224,6 +249,29 @@ export default function Home() {
     }
   }
 
+  const triggerReconciliation = async () => {
+    setTriggeringCollector('__recon__')
+    try {
+      const result = await atlasFetch<CleaningReport>('/cleaning/run', { method: 'POST' })
+      if (result.status === 'success') {
+        toast.success('Reconciliation completed', {
+          description: `${result.totalRecordsAudited} records audited · ${result.cleanSheetsDerived} clean sheets derived · ${result.namesDecoded} names decoded`,
+        })
+      } else if (result.status === 'partial') {
+        toast.info('Reconciliation completed (partial)', {
+          description: `${result.zeroFilledStats} zero-filled stats found · ${result.htmlEntityNames} HTML entity names fixed`,
+        })
+      } else {
+        toast.error('Reconciliation failed')
+      }
+      await refresh()
+    } catch (err) {
+      toast.error('Reconciliation failed', { description: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setTriggeringCollector(null)
+    }
+  }
+
   // ============================================================
   // Render
   // ============================================================
@@ -237,7 +285,7 @@ export default function Home() {
               <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-bold tracking-tight text-stone-900">ATLAS</h1>
                 <Badge variant="outline" className="text-xs">v1.0 · Phase 1</Badge>
-                <Badge className="bg-stone-900 text-stone-50">Module 1 / 9 — Data Collection</Badge>
+                <Badge className="bg-stone-900 text-stone-50">Module 2 / 9 — Cleaning &amp; Validation</Badge>
               </div>
               <p className="mt-1 text-sm text-stone-600">
                 Institutional Football Intelligence Platform · English Premier League · Built per Master Build Prompt v1.0
@@ -358,9 +406,9 @@ export default function Home() {
               <CardDescription className="text-xs">Per ATLAS spec Section 16</CardDescription>
             </CardHeader>
             <CardContent className="space-y-1.5 text-xs">
-              <div className="flex justify-between"><span className="text-stone-600">Module 1 — Data Collection</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">current</Badge></div>
-              <div className="flex justify-between"><span className="text-stone-600">Module 2 — Cleaning</span><Badge variant="outline">next</Badge></div>
-              <div className="flex justify-between"><span className="text-stone-600">Module 3 — Features</span><Badge variant="outline">queued</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Module 1 — Data Collection</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Module 2 — Cleaning</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">current</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Module 3 — Features</span><Badge variant="outline">next</Badge></div>
               <div className="flex justify-between"><span className="text-stone-600">Module 4 — 17 Layers</span><Badge variant="outline">queued</Badge></div>
               <div className="flex justify-between"><span className="text-stone-600">Modules 5-9</span><Badge variant="outline">queued</Badge></div>
             </CardContent>
@@ -437,6 +485,160 @@ export default function Home() {
               </Card>
             ))}
           </div>
+        </section>
+
+        {/* Module 2 — Data Quality & Cleaning */}
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-lg font-semibold text-stone-900">Module 2 — Data Quality &amp; Cleaning</h2>
+              <p className="text-sm text-stone-600">
+                Spec Section 5 — dedup audit, HTML entity decoding, zero-fill → null, clean sheet derivation
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={triggerReconciliation}
+              disabled={triggeringCollector === '__recon__'}
+            >
+              {triggeringCollector === '__recon__' ? (
+                <RefreshCw className="h-4 w-4 mr-1 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4 mr-1" />
+              )}
+              Run reconciliation
+            </Button>
+          </div>
+
+          {cleaningReport ? (
+            <div className="grid gap-3 md:grid-cols-4">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-stone-600">Status</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Badge
+                    className={
+                      cleaningReport.status === 'success'
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                        : cleaningReport.status === 'partial'
+                          ? 'bg-amber-100 text-amber-900 border-amber-200'
+                          : 'bg-red-100 text-red-800 border-red-200'
+                    }
+                  >
+                    {cleaningReport.status.toUpperCase()}
+                  </Badge>
+                  <p className="mt-2 text-xs text-stone-500">
+                    {new Date(cleaningReport.runAt).toLocaleString()}
+                  </p>
+                  <p className="text-xs text-stone-500">{cleaningReport.durationMs}ms</p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-stone-600">Records Audited</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold text-stone-900">
+                    {cleaningReport.totalRecordsAudited.toLocaleString()}
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-stone-600">Issues Found</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-stone-500">Duplicate fixtures</span>
+                    <span className={cleaningReport.duplicateFixtures > 0 ? 'text-red-600 font-mono' : 'text-emerald-600 font-mono'}>
+                      {cleaningReport.duplicateFixtures}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-stone-500">HTML entity names</span>
+                    <span className={cleaningReport.htmlEntityNames > 0 ? 'text-amber-600 font-mono' : 'text-emerald-600 font-mono'}>
+                      {cleaningReport.htmlEntityNames}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-stone-500">Zero-filled stats</span>
+                    <span className={cleaningReport.zeroFilledStats > 0 ? 'text-amber-600 font-mono' : 'text-emerald-600 font-mono'}>
+                      {cleaningReport.zeroFilledStats}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-stone-500">Orphaned FKs</span>
+                    <span className={cleaningReport.orphanedForeignKeys > 0 ? 'text-red-600 font-mono' : 'text-emerald-600 font-mono'}>
+                      {cleaningReport.orphanedForeignKeys}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-stone-500">Missing source confidence</span>
+                    <span className={cleaningReport.missingSourceConfidence > 0 ? 'text-red-600 font-mono' : 'text-emerald-600 font-mono'}>
+                      {cleaningReport.missingSourceConfidence}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-stone-600">Actions Taken</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-stone-500">Names decoded</span>
+                    <span className="font-mono text-stone-900">{cleaningReport.namesDecoded}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-stone-500">Zero → null</span>
+                    <span className="font-mono text-stone-900">{cleaningReport.zeroFilledToNull}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-stone-500">Clean sheets derived</span>
+                    <span className="font-mono text-stone-900">{cleaningReport.cleanSheetsDerived}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          ) : (
+            <Card>
+              <CardContent className="py-8 text-center text-sm text-stone-500">
+                No cleaning reports yet. Click "Run reconciliation" to audit the database,
+                decode HTML entities, convert zero-fills to null, and derive clean sheets
+                from match results.
+              </CardContent>
+            </Card>
+          )}
+
+          {cleaningReport && cleaningReport.sampleIssues.length > 0 && (
+            <Card className="mt-3">
+              <CardHeader>
+                <CardTitle className="text-sm">Sample Issues (first {Math.min(cleaningReport.sampleIssues.length, 10)})</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="h-[200px] pr-3">
+                  <div className="space-y-1.5">
+                    {cleaningReport.sampleIssues.slice(0, 10).map((issue, i) => (
+                      <div key={i} className="rounded-md border border-stone-200 bg-white px-3 py-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono font-semibold text-stone-900">
+                            {issue.table}.{issue.field}
+                          </span>
+                          <Badge variant="outline" className="text-xs">{issue.issue}</Badge>
+                        </div>
+                        <p className="mt-1 text-stone-600 leading-snug">{issue.message}</p>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </CardContent>
+            </Card>
+          )}
         </section>
 
         {/* DB Tables + Recent Runs */}

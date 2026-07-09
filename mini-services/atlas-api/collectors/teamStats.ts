@@ -8,6 +8,7 @@ import { logger } from "../lib/logger.ts";
 import { EPL_LEAGUE_ID, EPL_SEASON } from "@atlas/shared";
 import type { CollectorDefinition, CollectorRunResult } from "@atlas/shared";
 import { BaseCollector } from "./base.ts";
+import { normalizeName, validateStat, validateSourceConfidence } from "../lib/cleaning.ts";
 
 const LEAGUE_ID = parseInt(process.env.API_FOOTBALL_LEAGUE_ID || String(EPL_LEAGUE_ID), 10);
 const SEASON = parseInt(process.env.API_FOOTBALL_SEASON || String(EPL_SEASON), 10);
@@ -92,18 +93,24 @@ export class TeamStatsCollector extends BaseCollector {
           where: { teamId_season: { teamId: team.id, season: SEASON } },
         });
 
-        // Parse last-5 form string like "WWDLW" → points + goals
+        // Parse last-5 form string like "WWDLW" → points
         // API-Football's form field is e.g. "WDLWW" — each char is last-5 result
         const formChars = (s.form || "").split("");
-        let last5Points = 0;
-        for (const c of formChars) {
-          if (c === "W") last5Points += 3;
-          else if (c === "D") last5Points += 1;
+        let last5Points: number | null = null;
+        if (formChars.length > 0) {
+          last5Points = 0;
+          for (const c of formChars) {
+            if (c === "W") last5Points += 3;
+            else if (c === "D") last5Points += 1;
+          }
         }
-        // Defensive access — free-tier response may omit some nested fields.
-        // Use optional chaining + nullish coalescing for every field.
-        const last5GoalsFor = s.goals?.for?.total?.total ?? 0;
-        const last5GoalsAgainst = s.goals?.against?.total?.total ?? 0;
+        // Module 2: per spec Section 5, use null instead of 0 for missing stats.
+        // The free-tier API omits: clean, failed_to_score, goals.for.total (sometimes).
+        // NEVER zero-fill — return null so the DB honestly reflects what we don't know.
+        const last5GoalsFor = validateStat(s.goals?.for?.total?.total);
+        const last5GoalsAgainst = validateStat(s.goals?.against?.total?.total);
+        const cleanSheets = validateStat(s.clean?.total);       // null on free tier
+        const failedToScore = validateStat(s.failed_to_score?.total); // null on free tier
 
         await db.teamStat.upsert({
           where: { teamId_season: { teamId: team.id, season: SEASON } },
@@ -116,14 +123,15 @@ export class TeamStatsCollector extends BaseCollector {
             losses: s.fixtures?.loses?.total ?? 0,
             goalsFor: s.goals?.for?.total?.total ?? 0,
             goalsAgainst: s.goals?.against?.total?.total ?? 0,
-            cleanSheets: s.clean?.total ?? 0,
-            failedToScore: s.failed_to_score?.total ?? 0,
+            // Module 2: nullable fields — null when API doesn't provide
+            cleanSheets,        // null on free tier (will be derived in reconciliation job)
+            failedToScore,      // null on free tier
             yellowCards: s.cards?.yellow?.total ?? 0,
             redCards: s.cards?.red?.total ?? 0,
             last5Points,
             last5GoalsFor,
             last5GoalsAgainst,
-            sourceConfidence: 0.9,
+            sourceConfidence: validateSourceConfidence(0.9),
           },
           update: {
             fixturesPlayed: s.fixtures?.played?.total ?? 0,
@@ -132,8 +140,8 @@ export class TeamStatsCollector extends BaseCollector {
             losses: s.fixtures?.loses?.total ?? 0,
             goalsFor: s.goals?.for?.total?.total ?? 0,
             goalsAgainst: s.goals?.against?.total?.total ?? 0,
-            cleanSheets: s.clean?.total ?? 0,
-            failedToScore: s.failed_to_score?.total ?? 0,
+            cleanSheets,
+            failedToScore,
             yellowCards: s.cards?.yellow?.total ?? 0,
             redCards: s.cards?.red?.total ?? 0,
             last5Points,
@@ -143,11 +151,14 @@ export class TeamStatsCollector extends BaseCollector {
         });
 
         // Bump team.sourceConfidence — we now have detailed stats for this team
+        // Module 2: normalize team name (decode HTML entities)
+        const teamName = normalizeName(s.team.name) || team.name;
         await db.team.update({
           where: { id: team.id },
           data: {
-            sourceConfidence: 0.95,
+            sourceConfidence: validateSourceConfidence(0.95),
             logoUrl: s.team.logo ?? team.logoUrl,
+            name: teamName,
           },
         });
 

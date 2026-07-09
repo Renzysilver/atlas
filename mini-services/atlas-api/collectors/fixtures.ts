@@ -9,6 +9,7 @@ import { logger } from "../lib/logger.ts";
 import { EPL_LEAGUE_ID, EPL_SEASON, type ApiFootballFixture } from "@atlas/shared";
 import type { CollectorDefinition, CollectorRunResult } from "@atlas/shared";
 import { BaseCollector } from "./base.ts";
+import { normalizeName, normalizeTimestampToUtc, validateSourceConfidence } from "../lib/cleaning.ts";
 
 const LEAGUE_ID = parseInt(process.env.API_FOOTBALL_LEAGUE_ID || String(EPL_LEAGUE_ID), 10);
 const SEASON = parseInt(process.env.API_FOOTBALL_SEASON || String(EPL_SEASON), 10);
@@ -45,24 +46,27 @@ export class FixturesCollector extends BaseCollector {
     for (const fx of res.data) {
       try {
         // Upsert home team (minimal — full enrichment comes from team_stats)
+        // Module 2: normalize name (decode HTML entities, trim whitespace)
+        const homeTeamName = normalizeName(fx.teams.home.name);
         await db.team.upsert({
           where: { apiFootballId: fx.teams.home.id },
           create: {
             apiFootballId: fx.teams.home.id,
-            name: fx.teams.home.name,
-            sourceConfidence: 0.6, // minimal record; raised when team_stats runs
+            name: homeTeamName || fx.teams.home.name,
+            sourceConfidence: validateSourceConfidence(0.6),
           },
-          update: { name: fx.teams.home.name },
+          update: { name: homeTeamName || fx.teams.home.name },
         });
 
+        const awayTeamName = normalizeName(fx.teams.away.name);
         await db.team.upsert({
           where: { apiFootballId: fx.teams.away.id },
           create: {
             apiFootballId: fx.teams.away.id,
-            name: fx.teams.away.name,
-            sourceConfidence: 0.6,
+            name: awayTeamName || fx.teams.away.name,
+            sourceConfidence: validateSourceConfidence(0.6),
           },
-          update: { name: fx.teams.away.name },
+          update: { name: awayTeamName || fx.teams.away.name },
         });
 
         const homeTeam = await db.team.findUnique({ where: { apiFootballId: fx.teams.home.id } });
@@ -99,12 +103,13 @@ export class FixturesCollector extends BaseCollector {
             competition: "EPL",
             homeTeamId: homeTeam.id,
             awayTeamId: awayTeam.id,
-            kickoffUtc: new Date(fx.fixture.date),
+            // Module 2: normalize timestamp to UTC
+            kickoffUtc: normalizeTimestampToUtc(fx.fixture.date) || new Date(fx.fixture.date),
             status: matchStatus,
             homeScore: fx.goals.home,
             awayScore: fx.goals.away,
             venue: fx.fixture.venue?.name || null,
-            sourceConfidence: 0.9,
+            sourceConfidence: validateSourceConfidence(0.9),
           },
           update: {
             status: matchStatus,

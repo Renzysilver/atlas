@@ -8,6 +8,7 @@ import { logger } from "../lib/logger.ts";
 import { EPL_LEAGUE_ID, EPL_SEASON } from "@atlas/shared";
 import type { CollectorDefinition, CollectorRunResult } from "@atlas/shared";
 import { BaseCollector } from "./base.ts";
+import { normalizeName, validateSourceConfidence } from "../lib/cleaning.ts";
 
 const LEAGUE_ID = parseInt(process.env.API_FOOTBALL_LEAGUE_ID || String(EPL_LEAGUE_ID), 10);
 const SEASON = parseInt(process.env.API_FOOTBALL_SEASON || String(EPL_SEASON), 10);
@@ -79,16 +80,18 @@ export class StandingsCollector extends BaseCollector {
     for (const row of standings) {
       try {
         // Ensure team exists; bump sourceConfidence since standings confirms identity
+        // Module 2: normalize team name (decode HTML entities)
+        const teamName = normalizeName(row.team.name) || row.team.name;
         await db.team.upsert({
           where: { apiFootballId: row.team.id },
           create: {
             apiFootballId: row.team.id,
-            name: row.team.name,
+            name: teamName,
             logoUrl: row.team.logo,
-            sourceConfidence: 0.8,
+            sourceConfidence: validateSourceConfidence(0.8),
           },
           update: {
-            name: row.team.name,
+            name: teamName,
             logoUrl: row.team.logo,
             sourceConfidence: 0.85, // standings data confirms team identity
           },
@@ -123,7 +126,7 @@ export class StandingsCollector extends BaseCollector {
             form: row.form,
             homeRecord,
             awayRecord,
-            sourceConfidence: 0.95,
+            sourceConfidence: validateSourceConfidence(0.95),
           },
           update: {
             position: row.rank,

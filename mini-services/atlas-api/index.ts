@@ -16,6 +16,7 @@ import { startScheduler } from "./jobs/scheduler.ts";
 import { healthRouter } from "./routes/health.ts";
 import { collectorsRouter } from "./routes/collectors.ts";
 import { statsRouter } from "./routes/stats.ts";
+import { cleaningRouter } from "./routes/cleaning.ts";
 
 const PORT = parseInt(process.env.ATLAS_API_PORT || "4001", 10);
 
@@ -49,6 +50,10 @@ app.get("/", (_req, res) => {
       "POST /collectors/run-all-active",
       "GET  /stats",
       "GET  /stats/fixtures",
+      "POST /cleaning/run",
+      "GET  /cleaning/report",
+      "GET  /cleaning/reports",
+      "GET  /validation/issues",
     ],
   });
 });
@@ -56,6 +61,8 @@ app.get("/", (_req, res) => {
 app.use("/health", healthRouter);
 app.use("/collectors", collectorsRouter);
 app.use("/stats", statsRouter);
+app.use("/cleaning", cleaningRouter);
+app.use("/validation", cleaningRouter); // /validation/issues maps to cleaning router
 
 // 404
 app.use((_req, res) => {
