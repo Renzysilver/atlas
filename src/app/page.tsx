@@ -96,6 +96,25 @@ interface CleaningReport {
   cleanSheetsDerived: number
 }
 
+// Module 3 — Feature Engineering types
+interface FeatureDefinition {
+  name: string
+  description: string
+  level: 'season' | 'match'
+  status: 'active' | 'stub'
+}
+interface FeatureRegistry {
+  active: FeatureDefinition[]
+  stub: FeatureDefinition[]
+  total: number
+}
+interface FeatureSummary {
+  season: number
+  teamFeatures: Record<string, number>
+  matchFeatures: Record<string, number>
+  registry: { active: number; stub: number; total: number }
+}
+
 // ============================================================
 // API helpers — go through Caddy gateway via XTransformPort
 // ============================================================
@@ -170,6 +189,8 @@ export default function Home() {
   const [collectors, setCollectors] = useState<CollectorStatusResponse | null>(null)
   const [stats, setStats] = useState<DatabaseStatsResponse | null>(null)
   const [cleaningReport, setCleaningReport] = useState<CleaningReport | null>(null)
+  const [featureRegistry, setFeatureRegistry] = useState<FeatureRegistry | null>(null)
+  const [featureSummary, setFeatureSummary] = useState<FeatureSummary | null>(null)
   const [loading, setLoading] = useState(false)
   const [triggeringCollector, setTriggeringCollector] = useState<string | null>(null)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
@@ -177,16 +198,20 @@ export default function Home() {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const [h, c, s, cr] = await Promise.all([
+      const [h, c, s, cr, fr, fs] = await Promise.all([
         atlasFetch<HealthResponse>('/health'),
         atlasFetch<CollectorStatusResponse>('/collectors'),
         atlasFetch<DatabaseStatsResponse>('/stats'),
         atlasFetch<CleaningReport | null>('/cleaning/report').catch(() => null),
+        atlasFetch<FeatureRegistry>('/features/registry').catch(() => null),
+        atlasFetch<FeatureSummary>('/features').catch(() => null),
       ])
       setHealth(h)
       setCollectors(c)
       setStats(s)
       setCleaningReport(cr)
+      setFeatureRegistry(fr)
+      setFeatureSummary(fs)
       setLastRefresh(new Date())
     } catch (err) {
       toast.error('Failed to refresh ATLAS data', {
@@ -272,6 +297,39 @@ export default function Home() {
     }
   }
 
+  const triggerFeatureEngineering = async () => {
+    setTriggeringCollector('__features__')
+    try {
+      const result = await atlasFetch<{
+        status: string
+        durationMs: number
+        teamsProcessed: number
+        matchesProcessed: number
+        seasonFeaturesComputed: number
+        matchFeaturesComputed: number
+        stubFeaturesCreated: number
+        insufficientDataCount: number
+        errors: string[]
+      }>('/features/run', { method: 'POST' })
+      if (result.status === 'success') {
+        toast.success('Feature engineering completed', {
+          description: `${result.teamsProcessed} teams · ${result.matchesProcessed} matches · ${result.seasonFeaturesComputed} season features · ${result.matchFeaturesComputed} match features`,
+        })
+      } else if (result.status === 'partial') {
+        toast.info('Feature engineering completed (partial)', {
+          description: `${result.errors.length} errors · ${result.insufficientDataCount} insufficient_data`,
+        })
+      } else {
+        toast.error('Feature engineering failed')
+      }
+      await refresh()
+    } catch (err) {
+      toast.error('Feature engineering failed', { description: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setTriggeringCollector(null)
+    }
+  }
+
   // ============================================================
   // Render
   // ============================================================
@@ -285,7 +343,7 @@ export default function Home() {
               <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-bold tracking-tight text-stone-900">ATLAS</h1>
                 <Badge variant="outline" className="text-xs">v1.0 · Phase 1</Badge>
-                <Badge className="bg-stone-900 text-stone-50">Module 2 / 9 — Cleaning &amp; Validation</Badge>
+                <Badge className="bg-stone-900 text-stone-50">Module 3 / 9 — Feature Engineering</Badge>
               </div>
               <p className="mt-1 text-sm text-stone-600">
                 Institutional Football Intelligence Platform · English Premier League · Built per Master Build Prompt v1.0
@@ -407,8 +465,8 @@ export default function Home() {
             </CardHeader>
             <CardContent className="space-y-1.5 text-xs">
               <div className="flex justify-between"><span className="text-stone-600">Module 1 — Data Collection</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
-              <div className="flex justify-between"><span className="text-stone-600">Module 2 — Cleaning</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">current</Badge></div>
-              <div className="flex justify-between"><span className="text-stone-600">Module 3 — Features</span><Badge variant="outline">next</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Module 2 — Cleaning</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Module 3 — Features</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">current</Badge></div>
               <div className="flex justify-between"><span className="text-stone-600">Module 4 — 17 Layers</span><Badge variant="outline">queued</Badge></div>
               <div className="flex justify-between"><span className="text-stone-600">Modules 5-9</span><Badge variant="outline">queued</Badge></div>
             </CardContent>
@@ -638,6 +696,144 @@ export default function Home() {
                 </ScrollArea>
               </CardContent>
             </Card>
+          )}
+        </section>
+
+        {/* Module 3 — Feature Engineering */}
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-lg font-semibold text-stone-900">Module 3 — Feature Engineering</h2>
+              <p className="text-sm text-stone-600">
+                Spec Section 6 — 10 active features + 3 stub features computed from real data
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={triggerFeatureEngineering}
+              disabled={triggeringCollector === '__features__'}
+            >
+              {triggeringCollector === '__features__' ? (
+                <RefreshCw className="h-4 w-4 mr-1 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4 mr-1" />
+              )}
+              Compute features
+            </Button>
+          </div>
+
+          {/* Feature summary cards */}
+          {featureSummary && (
+            <div className="grid gap-3 md:grid-cols-4 mb-3">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-stone-600">Active Features</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold text-stone-900">{featureSummary.registry.active}</p>
+                  <p className="text-xs text-stone-500">computed from real data</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-stone-600">Stub Features</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold text-amber-700">{featureSummary.registry.stub}</p>
+                  <p className="text-xs text-stone-500">insufficient_data (honest)</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-stone-600">Season Features</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold text-stone-900">
+                    {Object.values(featureSummary.teamFeatures).reduce((a, b) => a + b, 0)}
+                  </p>
+                  <p className="text-xs text-stone-500">TeamFeature rows</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-stone-600">Match Features</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold text-stone-900">
+                    {Object.values(featureSummary.matchFeatures).reduce((a, b) => a + b, 0)}
+                  </p>
+                  <p className="text-xs text-stone-500">MatchFeature rows</p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Feature registry grid */}
+          {featureRegistry && (
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+              {featureRegistry.active.map((f) => {
+                const activeCount = featureSummary?.teamFeatures[`${f.name}:active`] || 0
+                const insufCount = featureSummary?.teamFeatures[`${f.name}:insufficient_data`] || 0
+                const matchActive = featureSummary?.matchFeatures[`${f.name}:active`] || 0
+                const matchInsuf = featureSummary?.matchFeatures[`${f.name}:insufficient_data`] || 0
+                const total = activeCount + insufCount + matchActive + matchInsuf
+                return (
+                  <Card key={f.name} className="flex flex-col">
+                    <CardHeader className="pb-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <CardTitle className="text-sm font-mono">{f.name}</CardTitle>
+                        <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">ACTIVE</Badge>
+                      </div>
+                      <CardDescription className="text-xs leading-snug">{f.description}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="flex-1 text-xs space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-stone-500">Level</span>
+                        <span className="font-mono text-stone-700">{f.level}</span>
+                      </div>
+                      {f.level === 'season' && (
+                        <div className="flex justify-between">
+                          <span className="text-stone-500">Computed</span>
+                          <span className="font-mono">
+                            <span className="text-emerald-700">{activeCount} active</span>
+                            {insufCount > 0 && <span className="text-amber-700"> · {insufCount} insufficient</span>}
+                          </span>
+                        </div>
+                      )}
+                      {f.level === 'match' && (
+                        <div className="flex justify-between">
+                          <span className="text-stone-500">Computed</span>
+                          <span className="font-mono">
+                            <span className="text-emerald-700">{matchActive} active</span>
+                            {matchInsuf > 0 && <span className="text-amber-700"> · {matchInsuf} insufficient</span>}
+                          </span>
+                        </div>
+                      )}
+                      {total === 0 && (
+                        <p className="text-stone-400 italic mt-1">Not yet computed — click "Compute features"</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                )
+              })}
+              {featureRegistry.stub.map((f) => (
+                <Card key={f.name} className="flex flex-col opacity-75">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <CardTitle className="text-sm font-mono">{f.name}</CardTitle>
+                      <Badge className="bg-amber-100 text-amber-900 border-amber-200">STUB</Badge>
+                    </div>
+                    <CardDescription className="text-xs leading-snug">{f.description}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex-1 text-xs">
+                    <div className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-amber-900">
+                      <p className="leading-snug">Returns insufficient_data — needs data source not yet active</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           )}
         </section>
 

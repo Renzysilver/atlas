@@ -393,3 +393,209 @@ What's Needed for Module 3:
   - Home/Away split, Possession Rating, Goal Threat, Clean Sheet Rate
   - Fatigue (days rest), Squad Depth (bench minutes played)
   - STUB: Tactical Flexibility, Momentum Score, Set Piece Rating
+
+---
+Task ID: 2.5 (Module 2 sign-off + production process management note)
+Agent: Zai (main, GLM)
+Task: Module 2 sign-off. Add worklog note per Vali directive: atlas-api needs
+a proper always-on process manager in production. Going forward, verify service
+state before reporting any module as done.
+
+Work Log:
+- Vali signed off Module 2 based on verified DB state (380 matches, 3168
+  injuries, cleaning report success, 10 clean sheets derived), NOT the live
+  dashboard — because the sandbox's process reaper kills atlas-api within
+  ~20s of start. This is a sandbox infrastructure limitation, not an ATLAS
+  code issue.
+- Root cause confirmed: sandbox periodically (a) truncates .env to 50 bytes
+  (just DATABASE_URL), (b) resets the SQLite DB, (c) reaps any process I
+  start manually. Only processes started by the sandbox's own init system
+  (Next.js :3000, Caddy :81) survive long-term.
+
+Production Process Management Note (PERMANENT):
+atlas-api MUST run under a proper always-on process manager in production.
+Two supported paths:
+
+1. Docker Compose (PRIMARY — already planned):
+   - infra/docker-compose.yml already uses `restart: unless-stopped`
+   - Docker manages the process lifecycle, survives host reboots
+   - atlas-api container auto-restarts on crash
+   - This is the recommended production deployment
+
+2. PM2 (FALLBACK — for non-Docker local testing):
+   - If Vali ever runs ATLAS locally WITHOUT Docker (e.g. bare Node/Bun),
+     use PM2 as the process manager:
+       npm install -g pm2
+       pm2 start "bun --env-file=.env index.ts" --name atlas-api
+       pm2 save
+       pm2 startup  # auto-restart on system boot
+   - PM2 handles: auto-restart on crash, log management, startup scripts
+   - Without PM2 or Docker, atlas-api dies when the terminal session ends
+
+3. systemd (LINUX SERVER ALTERNATIVE):
+   - For a dedicated Linux server without Docker:
+       [Unit]
+       Description=ATLAS API
+       After=network.target
+       [Service]
+       Type=simple
+       WorkingDirectory=/path/to/atlas/mini-services/atlas-api
+       ExecStart=/usr/bin/bun --env-file=../../.env index.ts
+       Restart=always
+       RestartSec=5
+       [Install]
+       WantedBy=multi-user.target
+
+DO NOT run atlas-api as a bare background process in production. The sandbox
+issue we hit (process reaping) will recur in any environment without a
+process manager. Docker Compose is the primary path and already handles this.
+
+Operational Lesson (for Zai, going forward):
+- Before reporting ANY module as done, verify:
+  (a) atlas-api is actually running and responding on :4001
+  (b) The dashboard can reach it via Caddy :81
+  (c) The health check shows the expected state
+- Do NOT rely on "the code is correct" alone. The sandbox's process
+  management can make a correct system appear broken. Check it yourself
+  before reporting done. Vali should not have to catch this.
+
+Stage Summary:
+- Module 2 SIGNED OFF by Vali
+- Production process management requirement documented (Docker primary,
+  PM2/systemd fallbacks)
+- Proceeding to Module 3 (Feature Engineering, spec Section 6)
+
+---
+Task ID: 3 (Module 3 — Feature Engineering)
+Agent: Zai (main, GLM)
+Task: Build Module 3 per ATLAS spec Section 6. Implement 10 active features
++ 3 stub features, feature engineering job, API endpoints, dashboard update.
+Commit + push per permanent git process.
+
+Work Log:
+- Added TeamFeature + MatchFeature models to Prisma schema:
+  - TeamFeature: season-level features (teamId × season × featureName)
+  - MatchFeature: match-specific features (matchId × teamId × featureName)
+  - Both use the same status/value/confidence/reason pattern as LayerOutput
+- Built lib/features.ts — feature engineering library:
+  - 11 active feature computation functions (10 from spec + fatigue)
+  - 3 stub feature functions (tactical_flexibility, momentum_score, set_piece_rating)
+  - FEATURE_REGISTRY: all 14 features with name, description, level, status, compute fn
+  - ACTIVE_FEATURE/INSUFFICIENT_FEATURE/STUB_FEATURE helper functions
+
+- Active features implemented (11):
+  SEASON-LEVEL (9):
+  1. team_strength — composite: points(0.5) + goalDiff(0.3) + position(0.2)
+  2. attack_rating — goalsFor/played, normalized to 0-1 (÷3)
+  3. defensive_stability — 1 - goalsAgainst/played(÷3) + cleanSheetRate×0.2
+  4. home_record_strength — (3W+D)/(3×games) from homeRecord "W-D-L"
+  5. away_record_strength — same formula from awayRecord
+  6. possession_rating — from team_stats.possessionAvg (null on free tier → insufficient_data)
+  7. goal_threat — shots+shotsOnTarget (null on free tier → insufficient_data)
+  8. clean_sheet_rate — cleanSheetsDerived/played (Module 2 derivation)
+  9. squad_depth — player count with minutes / 14 (normalized)
+
+  MATCH-LEVEL (2):
+  10. form_score — last-5 results before this match: (3W+D)/15
+  11. fatigue — days rest since last match, normalized: 0-3d=0-0.3, 4-7d=0.3-0.7, 7+d=0.7-1.0
+
+- Stub features (3):
+  - tactical_flexibility — needs formation data
+  - momentum_score — needs live data
+  - set_piece_rating — needs event data
+
+- Built jobs/featureEngineering.ts — computes all features for all teams + matches:
+  - Season-level: iterates teams × season features → TeamFeature table
+  - Match-level: iterates matches × teams × match features → MatchFeature table
+  - Upsert dedup on (teamId, season, featureName) and (matchId, teamId, featureName)
+  - Returns summary: teamsProcessed, matchesProcessed, counts by status
+
+- Added routes/features.ts — 5 endpoints:
+  - POST /features/run — trigger feature engineering
+  - GET /features — summary with feature counts by status
+  - GET /features/registry — all feature definitions
+  - GET /features/team/:teamId — all features for a team
+  - GET /features/match/:matchId — all features for a match
+
+- Added feature engineering cron to scheduler (5:00 AM daily, after 4:30 AM reconciliation)
+
+- Updated dashboard (src/app/page.tsx):
+  - Added Module 3 Feature Engineering section
+  - 4 summary cards: Active Features, Stub Features, Season Features, Match Features
+  - Feature registry grid: 11 active + 3 stub cards with live computation counts
+  - "Compute features" button triggers POST /features/run
+  - Updated header: Module 3 current
+  - Auto-fetches /features + /features/registry on every 15s refresh
+
+- Bugs fixed during development:
+  1. TypeScript arrow function type annotation syntax error in features.ts —
+     converted ACTIVE_FEATURE/INSUFFICIENT_FEATURE/STUB_FEATURE from arrow
+     functions with complex type annotations to simple function declarations
+  2. Variable name case error in routes/features.ts — `season` vs `SEASON`
+     (dashboard auto-refresh hit the endpoint and crashed atlas-api)
+
+Stage Summary — Module 3 Live Results:
+✅ Feature engineering: status=success, 5559ms, 0 errors
+✅ 20 teams processed, 380 matches processed
+✅ 113 active season features computed (TeamFeature)
+✅ 1480 active match features computed (MatchFeature)
+✅ 800 stub features created (honest insufficient_data)
+✅ 107 insufficient_data features (possession, goal_threat on free tier; squad_depth for teams without player_stats)
+
+Feature breakdown:
+- team_strength: 20 active ✓
+- attack_rating: 20 active ✓
+- defensive_stability: 20 active ✓
+- home_record_strength: 20 active ✓
+- away_record_strength: 20 active ✓
+- clean_sheet_rate: 10 active + 10 insufficient_data (only 10 teams have team_stats)
+- possession_rating: 20 insufficient_data (free tier — correct!)
+- goal_threat: 20 insufficient_data (free tier — correct!)
+- squad_depth: 3 active + 17 insufficient_data (only 3 teams have player_stats)
+- tactical_flexibility: 20 stub ✓
+- set_piece_rating: 20 stub ✓
+- form_score: 740 active + 20 insufficient_data (first matchday)
+- fatigue: 740 active + 20 insufficient_data (first matchday)
+- momentum_score: 760 stub ✓
+
+Liverpool FC sample (2024-25 champions, 84 pts):
+  team_strength        = 0.793  [active] — high for champions ✓
+  attack_rating        = 0.754  [active] — 86 goals / 38 games / 3 ✓
+  defensive_stability  = 0.714  [active] — strong defense ✓
+  home_record_strength = 0.807  [active] — dominant at Anfield ✓
+  away_record_strength = 0.667  [active] — decent away ✓
+  clean_sheet_rate     = 0.368  [active] — 14/38, matches Module 2 ✓
+  possession_rating    = null   [insufficient_data] — free tier ✓
+  goal_threat          = null   [insufficient_data] — free tier ✓
+  squad_depth          = null   [insufficient_data] — no player_stats yet ✓
+  tactical_flexibility = null   [stub] — needs formation data ✓
+  set_piece_rating     = null   [stub] — needs event data ✓
+
+Spec Section 6 Compliance:
+- Team Strength ✓ (composite from standings)
+- Attack Rating ✓ (goals per game, normalized)
+- Defensive Stability ✓ (goals conceded + clean sheet bonus)
+- Form Score ✓ (last-5 results, match-specific)
+- Home/Away split ✓ (separate home/away record strengths)
+- Possession Rating ✓ (honest insufficient_data on free tier)
+- Goal Threat ✓ (honest insufficient_data on free tier)
+- Clean Sheet Rate ✓ (uses Module 2 derived clean sheets)
+- Fatigue ✓ (days rest, match-specific)
+- Squad Depth ✓ (from player_stats minutes)
+- STUB: Tactical Flexibility ✓ (needs formation data)
+- STUB: Momentum Score ✓ (needs live data)
+- STUB: Set Piece Rating ✓ (needs event data)
+
+Service Verification (per Vali's directive — check before reporting done):
+- atlas-api WAS running at end of pipeline (STEP 13 confirmed PID alive, health HTTP 200)
+- Died when script's trap fired (sandbox process management issue, documented in Task 2.5)
+- Data is persisted in DB: 20 teams, 444 players, 380 matches, 3168 injuries, 113 active season features, 1480 active match features
+- API quota: 35/100 used (65 remaining)
+
+What's Needed for Module 4:
+- User sign-off on Module 3
+- Module 4 (Football Intelligence Engine, spec Section 7) will build:
+  - 17 intelligence layers, each implementing the uniform LayerOutput contract
+  - Each layer consumes TeamFeature + MatchFeature as inputs
+  - BrainOS orchestrates all 17 layers in parallel
+  - Per spec Section 3: 10 active layers, 4 stub, 1 future, 2 engine-level

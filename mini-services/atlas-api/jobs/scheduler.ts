@@ -6,6 +6,7 @@ import cron from "node-cron";
 import { logger } from "../lib/logger.ts";
 import { collectorRegistry } from "../collectors/registry.ts";
 import { runReconciliation } from "./reconciliation.ts";
+import { runFeatureEngineering } from "./featureEngineering.ts";
 
 let scheduledJobs: cron.ScheduledTask[] = [];
 
@@ -91,6 +92,36 @@ export function startScheduler(): void {
     scheduledJobs.push(reconciliationTask);
     logger.info("daily reconciliation cron scheduled", {
       schedule: reconciliationCron,
+    });
+  }
+
+  // Module 3: Daily feature engineering job — runs AFTER reconciliation
+  // (4 AM collectors → 4:30 AM reconciliation → 5:00 AM features) so it
+  // computes features from freshly-cleaned data.
+  // Per spec Section 6: compute 10 active features + 3 stub features.
+  const featureCron = process.env.FEATURE_ENGINEERING_CRON || "0 5 * * *";
+  if (cron.validate(featureCron)) {
+    const featureTask = cron.schedule(featureCron, async () => {
+      logger.info("daily feature engineering cron triggered", { schedule: featureCron });
+      try {
+        const result = await runFeatureEngineering();
+        logger.info("daily feature engineering completed", {
+          status: result.status,
+          durationMs: result.durationMs,
+          teamsProcessed: result.teamsProcessed,
+          matchesProcessed: result.matchesProcessed,
+          seasonFeatures: result.seasonFeaturesComputed,
+          matchFeatures: result.matchFeaturesComputed,
+        });
+      } catch (err) {
+        logger.error("daily feature engineering failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    });
+    scheduledJobs.push(featureTask);
+    logger.info("daily feature engineering cron scheduled", {
+      schedule: featureCron,
     });
   }
 }

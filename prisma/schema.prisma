@@ -52,6 +52,8 @@ model Team {
   teamStats         TeamStat[]
   h2hAsTeam1        HeadToHead[] @relation("H2H_Team1")
   h2hAsTeam2        HeadToHead[] @relation("H2H_Team2")
+  teamFeatures      TeamFeature[]
+  matchFeatures     MatchFeature[]
 
   @@index([name])
   @@index([city])
@@ -109,6 +111,7 @@ model Match {
   layerOutputs    LayerOutput[]
   predictions     Prediction[]
   result          Result?
+  matchFeatures   MatchFeature[]
 
   @@index([kickoffUtc])
   @@index([status])
@@ -282,6 +285,68 @@ model HeadToHead {
   team2           Team     @relation("H2H_Team2", fields: [team2Id], references: [id])
 
   @@unique([team1Id, team2Id])
+}
+
+// ============================================================
+// MODULE 3 — FEATURE ENGINEERING (spec Section 6)
+// ============================================================
+// Two feature tables:
+//   TeamFeature — season-level features (one row per team × season × feature)
+//   MatchFeature — match-specific features (one row per match × team × feature)
+//
+// Per spec Section 6, 10 features are ACTIVE (computed from real data):
+//   1. team_strength        (season) — composite from standings + stats
+//   2. attack_rating         (season) — goals per game, normalized
+//   3. defensive_stability   (season) — goals conceded per game + clean sheet rate
+//   4. form_score            (match)  — last-5 results before this match
+//   5. home_record_strength  (season) — home-specific rating
+//   6. away_record_strength  (season) — away-specific rating
+//   7. possession_rating     (season) — from team_stats (null on free tier → insufficient_data)
+//   8. goal_threat           (season) — shots/shots on target per game
+//   9. clean_sheet_rate      (season) — derived clean sheets / games (Module 2 derivation)
+//  10. squad_depth           (season) — bench minutes from player_stats
+//  11. fatigue               (match)  — days rest since last match
+//
+// 3 features are STUB (interface only, needs data not yet active):
+//   - tactical_flexibility   (needs formation data)
+//   - momentum_score         (needs live data)
+//   - set_piece_rating       (needs granular event data)
+
+model TeamFeature {
+  id              String   @id @default(cuid())
+  teamId          String
+  season          Int
+  featureName     String   // e.g. "team_strength", "attack_rating"
+  value           Float?   // null when status != active
+  confidence      Float    @default(0.8) // 0-1
+  status          String   @default("active") // active | insufficient_data | stub
+  reason          String?  // explanation for non-active status
+  computedAt      DateTime @default(now())
+
+  team            Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, season, featureName])
+  @@index([season, featureName])
+  @@index([teamId, season])
+}
+
+model MatchFeature {
+  id              String   @id @default(cuid())
+  matchId         String
+  teamId          String
+  featureName     String   // e.g. "form_score", "fatigue"
+  value           Float?   // null when status != active
+  confidence      Float    @default(0.8)
+  status          String   @default("active")
+  reason          String?
+  computedAt      DateTime @default(now())
+
+  match           Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  team            Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, teamId, featureName])
+  @@index([matchId])
+  @@index([teamId])
 }
 
 // ============================================================
