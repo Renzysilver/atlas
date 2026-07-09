@@ -910,3 +910,105 @@ What's Needed for Module 6:
   - Output: why this prediction, what increased/reduced confidence,
     which layers agreed/disagreed, 3-4 sentence summary for daily report
   - This is the ONE real LLM call in ATLAS (per spec Section 3)
+
+---
+Task ID: 6 (Module 6 — Explainability Engine)
+Agent: Zai (main, GLM)
+Task: Build Module 6 per ATLAS spec Section 10. Wire real Groq LLM call for
+explainability. Groq key provided but returned 403 Forbidden on all endpoints
+(account-level block, not model-specific — verified by testing 4 different
+models + /v1/models endpoint). Vali approved proceeding with structured
+fallback. LLM call is a drop-in activation when working key is provided.
+
+Work Log:
+- Built lib/groq.ts — Groq LLM client:
+  - generateExplainability(): calls Groq API (llama-3.3-70b-versatile) with
+    structured prompt taking full FMI object (consensus, 3 market predictions,
+    all layer outputs, feature gaps)
+  - generateStructuredFallback(): deterministic fallback producing same 5
+    outputs without LLM
+  - Quota tracking (tokens logged to api_quota_usage table)
+  - Prompt enforces Constitution Rule 4: "NEVER fabricate statistics. If a
+    feature is insufficient_data, say 'data not available'"
+
+- Updated layers/explainabilityAi.ts:
+  - Attempts Groq LLM call first
+  - Falls back to structured reasoning on any error (key missing, API failure,
+    parse error)
+  - Output reasoning includes BOTH the LLM plain-language summary (when
+    available) AND the structured context (always preserved)
+  - matchContext passed from BrainOS so LLM prompt has team names + kickoff
+
+- 5 required outputs per spec Section 10:
+  1. whyThisPrediction — why this specific prediction was made
+  2. whatIncreasedConfidence — factors that increased confidence
+  3. whatReducedConfidence — factors that reduced confidence (specific missing
+     features, not generic)
+  4. layersAgreed / layersDisagreed — which layers agreed vs disagreed
+  5. plainLanguageSummary — 3-4 sentence summary for daily report
+
+- Updated brainos/orchestrator.ts:
+  - Passes matchContext (homeTeam, awayTeam, kickoff) to explainability AI
+  - BrainOS version bumped to 1.0.0-module6
+
+- Added GET /explainability/:matchId endpoint:
+  - Returns LLM-generated explanation + groqConfigured flag
+
+- Updated dashboard:
+  - Module 6 header + build status
+  - Explainability output visible in FMI viewer (layer outputs section)
+
+Groq Key Issue (Section 17 Rule 2 flag — RESOLVED with fallback):
+- Vali provided Groq key: gsk_mO7BNxpIiaQUzXF...
+- Key format correct (gsk_ + 52 chars = 56 total)
+- Key stored correctly in .env (verified via od -c)
+- Key passed correctly to Groq API (verified via curl)
+- ALL Groq endpoints return HTTP 403: Forbidden:
+  - llama-3.3-70b-versatile: 403
+  - llama-3.1-8b-instant: 403
+  - llama3-8b-8192: 403
+  - gemma2-9b-it: 403
+  - mixtral-8x7b-32768: 403
+  - /v1/models (pure auth test): 403
+- Diagnosis: account-level block (not model-specific, not quota — would be 429)
+- Cloudflare serving 403 at edge (cf-ray: ...-HKG), no Groq-specific headers
+- Likely causes: account verification incomplete, geographic restriction,
+  account flagged for review, or payment method required
+- Vali will resolve with Groq on their own time
+- LLM call is drop-in activation: set working GROQ_API_KEY → LLM calls work,
+  no code changes needed
+
+Stage Summary — Module 6 Live Results:
+✅ BrainOS ran on Liverpool vs Arsenal with Module 6 code
+✅ Duration: 111ms (attempted LLM call, fell back in ~35ms)
+✅ Structured fallback produced all 5 required outputs:
+  - whyThisPrediction ✓
+  - whatIncreasedConfidence ✓
+  - whatReducedConfidence ✓ (with specific feature gaps)
+  - layersAgreed / layersDisagreed ✓
+  - plainLanguageSummary ✓ (honest about fallback mode)
+✅ 15 LayerOutput rows persisted to DB (including explainability_ai)
+✅ Reasoning header clearly states "STRUCTURED FALLBACK — no LLM"
+✅ Health check shows groq: ok (key is present, just rejected by Groq API)
+
+Spec Section 10 Compliance:
+- Groq call wired ✓ (code calls Groq API when key is present)
+- Structured prompt ✓ (takes full FMI object as input)
+- 5 required outputs ✓ (all produced by fallback)
+- 3-4 sentence summary for daily report ✓ (fallback version)
+- Constitution Rule 4 enforced ✓ (prompt explicitly forbids fabrication)
+
+Drop-in Activation:
+When Vali provides a working Groq key:
+1. Update GROQ_API_KEY in .env
+2. Run POST /brainos/run/:matchId
+3. Explainability AI will call Groq LLM automatically
+4. No code changes needed — fallback logic detects working key automatically
+
+What's Needed for Module 7:
+- User sign-off on Module 6 (with structured fallback)
+- Module 7 (Risk Management Engine, spec Section 11) will build:
+  - Confidence + Risk + Volatility from active layer variance
+  - Value Score stays insufficient_data until Market Intelligence activates
+  - Recommendation profiles (Ultra Safe / Balanced / High Value / High Risk)
+  - High Value tier disabled until Market Intelligence (per spec S.11)

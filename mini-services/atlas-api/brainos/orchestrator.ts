@@ -67,7 +67,7 @@ export interface FinalMatchIntelligence {
 // BrainOS orchestrator
 // ============================================================
 
-const BRAINOS_VERSION = "1.0.0-module5";
+const BRAINOS_VERSION = "1.0.0-module6";
 
 export async function runBrainOS(matchId: string): Promise<FinalMatchIntelligence> {
   const startMs = Date.now();
@@ -166,13 +166,19 @@ export async function runBrainOS(matchId: string): Promise<FinalMatchIntelligenc
   await persistPredictions(matchId, decisionResult.predictions, consensus, statisticalLayerOutputs);
 
   // 5. Pass consensus + raw outputs + decision predictions to Explainability AI (spec Section 8.4)
-  logger.info("brainos: generating explainability");
+  // Module 6: pass matchContext so the LLM prompt has team names + kickoff
+  logger.info("brainos: generating explainability (Module 6: Groq LLM if configured)");
   const explainabilityAi = new ExplainabilityAiLayer();
   const explainability = await explainabilityAi.computeExplainability({
     layerOutputs: [...statisticalLayerOutputs, consensus],
     consensus,
     matchId,
     marketPredictions: decisionResult.predictions,
+    matchContext: {
+      homeTeam: match.homeTeam.name,
+      awayTeam: match.awayTeam.name,
+      kickoff: match.kickoffUtc.toISOString(),
+    },
   });
 
   // 6. Log prediction via Learning Intelligence (spec Section 8.6 + Module 8)

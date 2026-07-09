@@ -445,7 +445,7 @@ export default function Home() {
               <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-bold tracking-tight text-stone-900">ATLAS</h1>
                 <Badge variant="outline" className="text-xs">v1.0 · Phase 1</Badge>
-                <Badge className="bg-stone-900 text-stone-50">Module 5 / 9 — Decision Engine</Badge>
+                <Badge className="bg-stone-900 text-stone-50">Module 6 / 9 — Explainability</Badge>
               </div>
               <p className="mt-1 text-sm text-stone-600">
                 Institutional Football Intelligence Platform · English Premier League · Built per Master Build Prompt v1.0
@@ -570,8 +570,9 @@ export default function Home() {
               <div className="flex justify-between"><span className="text-stone-600">Module 2 — Cleaning</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
               <div className="flex justify-between"><span className="text-stone-600">Module 3 — Features</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
               <div className="flex justify-between"><span className="text-stone-600">Module 4 — 17 Layers</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
-              <div className="flex justify-between"><span className="text-stone-600">Module 5 — Decision Engine</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">current</Badge></div>
-              <div className="flex justify-between"><span className="text-stone-600">Modules 6-9</span><Badge variant="outline">queued</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Module 5 — Decision Engine</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Module 6 — Explainability</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">current</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Modules 7-9</span><Badge variant="outline">queued</Badge></div>
             </CardContent>
           </Card>
         </section>

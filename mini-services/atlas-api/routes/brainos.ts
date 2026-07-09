@@ -175,3 +175,48 @@ brainosRouter.get("/predictions/:matchId", async (req, res) => {
   });
 });
 
+// Module 6 — Explainability endpoint
+brainosRouter.get("/explainability/:matchId", async (req, res) => {
+  const { matchId } = req.params;
+
+  const match = await db.match.findUnique({
+    where: { id: matchId },
+    include: { homeTeam: true, awayTeam: true },
+  });
+
+  if (!match) {
+    res.status(404).json({ error: "Match not found" });
+    return;
+  }
+
+  // Get the explainability_ai layer output
+  const explainability = await db.layerOutput.findUnique({
+    where: { matchId_layerName: { matchId, layerName: "explainability_ai" } },
+  });
+
+  if (!explainability) {
+    res.status(404).json({
+      error: "No explainability output found. Run POST /brainos/run/:matchId first.",
+    });
+    return;
+  }
+
+  res.json({
+    matchId,
+    match: {
+      homeTeam: match.homeTeam.name,
+      awayTeam: match.awayTeam.name,
+      kickoff: match.kickoffUtc.toISOString(),
+      score: match.homeScore !== null ? `${match.homeScore}-${match.awayScore}` : null,
+    },
+    explainability: {
+      status: explainability.status,
+      score: explainability.score,
+      confidence: explainability.confidence,
+      reasoning: explainability.reasoning,
+      computedAt: explainability.computedAt.toISOString(),
+    },
+    groqConfigured: !!(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== "YOUR_GROQ_API_KEY_HERE"),
+  });
+});
+

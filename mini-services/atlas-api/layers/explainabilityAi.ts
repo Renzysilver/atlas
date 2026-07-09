@@ -25,12 +25,20 @@ import type { LayerOutput } from "@atlas/shared";
 import { BaseLayer, type LayerContext, type LayerDefinition } from "./base.ts";
 import type { ConsensusResult } from "./consensusEngine.ts";
 import type { MarketPrediction } from "../brainos/decisionEngine.ts";
+import { generateExplainability, generateStructuredFallback, type GroqExplainabilityOutput } from "../lib/groq.ts";
+import { logger } from "../lib/logger.ts";
 
 export interface ExplainabilityInput {
   layerOutputs: LayerOutput[];
   consensus: ConsensusResult;
   matchId: string;
   marketPredictions?: MarketPrediction[];
+  // Context for LLM prompt
+  matchContext?: {
+    homeTeam: string;
+    awayTeam: string;
+    kickoff: string;
+  };
 }
 
 export class ExplainabilityAiLayer extends BaseLayer {
@@ -43,8 +51,9 @@ export class ExplainabilityAiLayer extends BaseLayer {
   };
 
   // Special compute method — takes layer outputs + consensus
+  // Module 6: now calls Groq LLM if GROQ_API_KEY is set, falls back to structured reasoning
   async computeExplainability(input: ExplainabilityInput): Promise<LayerOutput> {
-    const { layerOutputs, consensus, marketPredictions } = input;
+    const { layerOutputs, consensus, marketPredictions, matchContext } = input;
 
     // Extract active layers that fed consensus
     const activeLayers = layerOutputs.filter(
@@ -69,7 +78,6 @@ export class ExplainabilityAiLayer extends BaseLayer {
     const missingFeatureNotes: string[] = [];
     for (const layer of activeLayers) {
       if (layer.reasoning && layer.reasoning.includes("missing") || layer.reasoning?.includes("insufficient")) {
-        // Extract the missing features line
         const lines = layer.reasoning.split("\n");
         const missingLines = lines.filter(
           (l) => l.includes("missing") || l.includes("Missing") || l.includes("insufficient"),
@@ -90,10 +98,84 @@ export class ExplainabilityAiLayer extends BaseLayer {
       prediction = `Even match (Draw most likely at ${(consensus.drawProbability * 100).toFixed(1)}%)`;
     }
 
-    // Build structured reasoning (Module 6 will replace this with LLM output)
+    // ============================================================
+    // Module 6: Attempt Groq LLM call, fall back to structured reasoning
+    // ============================================================
+    let groqOutput: GroqExplainabilityOutput;
+    let usedLlm = false;
+
+    const groqInput = {
+      matchId: input.matchId,
+      homeTeam: matchContext?.homeTeam ?? "Home",
+      awayTeam: matchContext?.awayTeam ?? "Away",
+      kickoff: matchContext?.kickoff ?? "unknown",
+      consensus: {
+        score: consensus.score,
+        confidence: consensus.confidence,
+        homeWinProbability: consensus.homeWinProbability,
+        drawProbability: consensus.drawProbability,
+        awayWinProbability: consensus.awayWinProbability,
+        layersContributing: consensus.layersContributing,
+        layersExcluded: consensus.layersExcluded,
+        agreementScore: consensus.agreementScore,
+      },
+      marketPredictions: (marketPredictions ?? []).map((mp) => ({
+        marketType: mp.marketType,
+        selection: mp.selection,
+        probability: mp.probability,
+        confidence: mp.confidence,
+        recommendationProfile: mp.recommendationProfile,
+      })),
+      layerOutputs: layerOutputs.map((l) => ({
+        layer_name: l.layer_name,
+        status: l.status,
+        score: l.score,
+        confidence: l.confidence,
+        reasoning: l.reasoning,
+      })),
+    };
+
+    try {
+      groqOutput = await generateExplainability(groqInput);
+      usedLlm = true;
+      logger.info("explainability: used Groq LLM", {
+        matchId: input.matchId,
+        tokensUsed: groqOutput.tokensUsed,
+        durationMs: groqOutput.durationMs,
+      });
+    } catch (err) {
+      logger.warn("explainability: Groq LLM failed, using structured fallback", {
+        matchId: input.matchId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      groqOutput = generateStructuredFallback(groqInput);
+    }
+
+    // Build reasoning: LLM output + structured context (Module 6)
     const reasoningParts: string[] = [
-      `=== EXPLAINABILITY (structured — LLM call in Module 6) ===`,
+      `=== EXPLAINABILITY (${usedLlm ? "GROQ LLM — " + groqOutput.model : "STRUCTURED FALLBACK — no LLM"}) ===`,
+      `Match: ${matchContext?.homeTeam ?? "Home"} vs ${matchContext?.awayTeam ?? "Away"}`,
+      `Generated: ${new Date().toISOString()} (${groqOutput.durationMs}ms${usedLlm ? `, ${groqOutput.tokensUsed} tokens` : ""})`,
       ``,
+      `--- LLM PLAIN-LANGUAGE SUMMARY (3-4 sentences, for daily report) ---`,
+      groqOutput.plainLanguageSummary,
+      ``,
+      `--- WHY THIS PREDICTION ---`,
+      groqOutput.whyThisPrediction,
+      ``,
+      `--- WHAT INCREASED CONFIDENCE ---`,
+      groqOutput.whatIncreasedConfidence,
+      ``,
+      `--- WHAT REDUCED CONFIDENCE ---`,
+      groqOutput.whatReducedConfidence,
+      ``,
+      `--- LAYERS AGREED ---`,
+      groqOutput.layersAgreed,
+      ``,
+      `--- LAYERS DISAGREED ---`,
+      groqOutput.layersDisagreed,
+      ``,
+      `--- STRUCTURED CONTEXT (always preserved) ---`,
       `PREDICTION: ${prediction}`,
       `Confidence: ${consensus.confidence?.toFixed(3) ?? "null"}`,
       ``,
@@ -103,28 +185,6 @@ export class ExplainabilityAiLayer extends BaseLayer {
       ),
       `  High Value tier: DISABLED (requires Market Intelligence — per spec Section 11)`,
       ``,
-      `WHY THIS PREDICTION:`,
-      `  Consensus score ${consensus.score.toFixed(3)} computed from ${consensus.layersContributing} active layers.`,
-      `  ${agreeingLayers.length} layers agreed (within 0.10 of consensus): ${agreeingLayers.join(", ") || "none"}`,
-      `  ${disagreeingLayers.length} layers disagreed: ${disagreeingLayers.join(", ") || "none"}`,
-      ``,
-      `WHAT INCREASED CONFIDENCE:`,
-      `  Agreement score: ${consensus.agreementScore.toFixed(3)} (higher = more layer consensus)`,
-      `  Active layer count: ${activeLayers.length} (more layers = higher confidence)`,
-      ...activeLayers
-        .filter((l) => l.confidence !== null && l.confidence > 0.7)
-        .map((l) => `  ${l.layer_name} confidence: ${l.confidence!.toFixed(3)}`),
-      ``,
-      `WHAT REDUCED CONFIDENCE:`,
-      ...missingFeatureNotes.slice(0, 10).map((note) => `  ${note}`),
-      ...excludedLayers
-        .filter((l) => l.status === "insufficient_data")
-        .slice(0, 5)
-        .map((l) => `  ${l.layer_name}: insufficient_data (excluded from consensus)`),
-      ...activeLayers
-        .filter((l) => l.confidence !== null && l.confidence < 0.6)
-        .map((l) => `  ${l.layer_name} low confidence: ${l.confidence!.toFixed(3)}`),
-      ``,
       `LAYERS AGREED: ${agreeingLayers.join(", ") || "none"}`,
       `LAYERS DISAGREED: ${disagreeingLayers.join(", ") || "none"}`,
       `LAYERS EXCLUDED: ${excludedLayers.map((l) => l.layer_name).join(", ") || "none"}`,
@@ -133,11 +193,6 @@ export class ExplainabilityAiLayer extends BaseLayer {
       ...missingFeatureNotes.length > 0
         ? missingFeatureNotes.map((note) => `  ${note}`)
         : ["  None — all expected features available"],
-      ``,
-      `MODULE 6 NOTE: This structured reasoning will be converted to 3-4 sentence`,
-      `plain-language summary by the Groq LLM call (llama-3.3-70b-versatile).`,
-      `The LLM will receive this structured text + the full Final Match Intelligence`,
-      `object and produce human-readable reasoning for the daily report.`,
     ];
 
     return {
