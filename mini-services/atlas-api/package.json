@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --hot index.ts",
-    "start": "bun index.ts",
+    "dev": "bun --hot --env-file=../../.env index.ts",
+    "start": "bun --env-file=../../.env index.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
