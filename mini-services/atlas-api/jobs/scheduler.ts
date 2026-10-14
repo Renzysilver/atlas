@@ -10,6 +10,7 @@ import { runFeatureEngineering } from "./featureEngineering.ts";
 import { runBrainOS } from "../brainos/orchestrator.ts";
 import { runResultsComparison } from "./resultsComparison.ts";
 import { runAccuracyMeasurement } from "./accuracyMeasurement.ts";
+import { runDailyReport } from "./dailyReport.ts";
 import { db } from "../lib/db.ts";
 
 let scheduledJobs: cron.ScheduledTask[] = [];
@@ -58,16 +59,29 @@ export function startScheduler(): void {
     });
   }
 
-  // Daily report cron — per spec Section 2: 5-6 AM window.
-  // For Module 1, this is registered but no-op (DailyReport generation is
-  // Module 9). The schedule is reserved here so the cron slot is visible.
-  const dailyReportCron = process.env.DAILY_REPORT_CRON || "0 5 * * *";
+  // Module 9: Daily report — runs at 6:00 AM (after BrainOS at 5:30 AM)
+  // Per spec Section 13: generate report + send to admin + subscribers.
+  const dailyReportCron = process.env.DAILY_REPORT_CRON || "0 6 * * *";
   if (cron.validate(dailyReportCron)) {
     const dailyTask = cron.schedule(dailyReportCron, async () => {
-      logger.info("daily report cron triggered — no-op in Module 1 (Module 9 implements report generation)");
+      logger.info("daily report cron triggered", { schedule: dailyReportCron });
+      try {
+        const result = await runDailyReport();
+        logger.info("daily report completed", {
+          status: result.status,
+          ultraSafe: result.report?.ultraSafePicks.length ?? 0,
+          balanced: result.report?.balancedPicks.length ?? 0,
+          emailsSent: result.emailsSent,
+          durationMs: result.durationMs,
+        });
+      } catch (err) {
+        logger.error("daily report failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     });
     scheduledJobs.push(dailyTask);
-    logger.info("daily report cron scheduled (no-op until Module 9)", {
+    logger.info("daily report cron scheduled (Module 9 ACTIVE)", {
       schedule: dailyReportCron,
     });
   }

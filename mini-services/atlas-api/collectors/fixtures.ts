@@ -1,23 +1,25 @@
 // ATLAS API — collectors/fixtures.ts
-// 🟢 ACTIVE — EPL fixtures & results ingestion.
-// Source: API-Football GET /fixtures?league=39&season=2025
+// 🟢 ACTIVE — Multi-league fixtures & results ingestion.
+// Source: API-Football GET /fixtures?league=ID&season=YEAR
 // Writes: Match table (and ensures both Team rows exist)
+//
+// Multi-league: activated via ATLAS_ACTIVE_LEAGUES env var.
+// Default: EPL only (league 39). Add comma-separated IDs to expand.
+// Example: ATLAS_ACTIVE_LEAGUES=39,2,140,135,78,61
+// Quota note: each league = 1 API call. With 100/day free limit, be careful.
 
 import { db } from "../lib/db.ts";
 import { apiFootball } from "../lib/apiFootball.ts";
 import { logger } from "../lib/logger.ts";
-import { EPL_LEAGUE_ID, EPL_SEASON, type ApiFootballFixture } from "@atlas/shared";
+import { getActiveLeagues, type ApiFootballFixture } from "@atlas/shared";
 import type { CollectorDefinition, CollectorRunResult } from "@atlas/shared";
 import { BaseCollector } from "./base.ts";
 import { normalizeName, normalizeTimestampToUtc, validateSourceConfidence } from "../lib/cleaning.ts";
 
-const LEAGUE_ID = parseInt(process.env.API_FOOTBALL_LEAGUE_ID || String(EPL_LEAGUE_ID), 10);
-const SEASON = parseInt(process.env.API_FOOTBALL_SEASON || String(EPL_SEASON), 10);
-
 export class FixturesCollector extends BaseCollector {
   readonly definition: CollectorDefinition = {
     name: "fixtures",
-    description: "EPL fixtures & results for the active season",
+    description: "Multi-league fixtures & results (EPL + configured leagues)",
     status: "active",
     feedsLayer: "historical_intelligence",
     schedule: process.env.COLLECTOR_FIXTURES_CRON || "0 */6 * * *",
@@ -26,27 +28,63 @@ export class FixturesCollector extends BaseCollector {
   protected async ingest(): Promise<
     Omit<CollectorRunResult, "collectorName" | "startedAt" | "finishedAt" | "durationMs" | "status">
   > {
+    const activeLeagues = getActiveLeagues();
+    logger.info("fixtures: running for leagues", {
+      leagues: activeLeagues.map((l) => `${l.shortName}(${l.id})`).join(", "),
+    });
+
+    let totalIngested = 0;
+    let totalUpdated = 0;
+    let totalSkipped = 0;
+
+    for (const league of activeLeagues) {
+      try {
+        const { ingested, updated, skipped } = await this.ingestLeague(league.id, league.season, league.shortName);
+        totalIngested += ingested;
+        totalUpdated += updated;
+        totalSkipped += skipped;
+        logger.info("fixtures: league complete", {
+          league: league.shortName,
+          ingested,
+          updated,
+          skipped,
+        });
+      } catch (err) {
+        logger.error("fixtures: league failed", {
+          league: league.shortName,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        totalSkipped++;
+      }
+    }
+
+    return {
+      recordsIngested: totalIngested,
+      recordsUpdated: totalUpdated,
+      recordsSkipped: totalSkipped,
+    };
+  }
+
+  private async ingestLeague(
+    leagueId: number,
+    season: number,
+    competition: string
+  ): Promise<{ ingested: number; updated: number; skipped: number }> {
     const res = await apiFootball<ApiFootballFixture[]>({
       endpoint: "fixtures",
-      path: `/fixtures?league=${LEAGUE_ID}&season=${SEASON}`,
+      path: `/fixtures?league=${leagueId}&season=${season}`,
     });
 
     if (!res.ok || !res.data) {
-      // If quota exhausted or endpoint unavailable, this is HONEST insufficient_data.
-      // Per Constitution Rule 4: do NOT fabricate fixtures.
-      throw new Error(`API-Football fixtures fetch failed: ${res.error}`);
+      throw new Error(`API-Football fixtures fetch failed for ${competition}: ${res.error}`);
     }
 
     let ingested = 0;
     let updated = 0;
     let skipped = 0;
 
-    // First pass: ensure both teams exist (we get minimal team data here —
-    // team_stats / standings collectors will enrich later).
     for (const fx of res.data) {
       try {
-        // Upsert home team (minimal — full enrichment comes from team_stats)
-        // Module 2: normalize name (decode HTML entities, trim whitespace)
         const homeTeamName = normalizeName(fx.teams.home.name);
         await db.team.upsert({
           where: { apiFootballId: fx.teams.home.id },
@@ -71,39 +109,27 @@ export class FixturesCollector extends BaseCollector {
 
         const homeTeam = await db.team.findUnique({ where: { apiFootballId: fx.teams.home.id } });
         const awayTeam = await db.team.findUnique({ where: { apiFootballId: fx.teams.away.id } });
-        if (!homeTeam || !awayTeam) {
-          skipped++;
-          continue;
-        }
+        if (!homeTeam || !awayTeam) { skipped++; continue; }
 
-        // Parse matchweek from "Regular Season - 17" → 17
         const matchweek = parseInt(fx.league.round?.split("-").pop()?.trim() || "0", 10) || null;
 
-        // Map API-Football status short → ATLAS status
         const statusShort = fx.fixture.status.short;
         let matchStatus = "scheduled";
-        if (["1H", "2H", "HT", "ET", "BT", "P", "LIVE"].includes(statusShort)) {
-          matchStatus = "live";
-        } else if (["FT", "AET", "PEN"].includes(statusShort)) {
-          matchStatus = "finished";
-        } else if (["PST", "CANC", "ABD", "AWD", "WO"].includes(statusShort)) {
-          matchStatus = "postponed";
-        }
+        if (["1H", "2H", "HT", "ET", "BT", "P", "LIVE"].includes(statusShort)) matchStatus = "live";
+        else if (["FT", "AET", "PEN"].includes(statusShort)) matchStatus = "finished";
+        else if (["PST", "CANC", "ABD", "AWD", "WO"].includes(statusShort)) matchStatus = "postponed";
 
-        const existing = await db.match.findUnique({
-          where: { apiFootballId: fx.fixture.id },
-        });
+        const existing = await db.match.findUnique({ where: { apiFootballId: fx.fixture.id } });
 
-        const result = await db.match.upsert({
+        await db.match.upsert({
           where: { apiFootballId: fx.fixture.id },
           create: {
             apiFootballId: fx.fixture.id,
             season: fx.league.season,
             matchweek,
-            competition: "EPL",
+            competition,
             homeTeamId: homeTeam.id,
             awayTeamId: awayTeam.id,
-            // Module 2: normalize timestamp to UTC
             kickoffUtc: normalizeTimestampToUtc(fx.fixture.date) || new Date(fx.fixture.date),
             status: matchStatus,
             homeScore: fx.goals.home,
@@ -131,10 +157,6 @@ export class FixturesCollector extends BaseCollector {
       }
     }
 
-    return {
-      recordsIngested: ingested,
-      recordsUpdated: updated,
-      recordsSkipped: skipped,
-    };
+    return { ingested, updated, skipped };
   }
 }

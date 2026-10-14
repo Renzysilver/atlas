@@ -546,3 +546,68 @@ model LearningReport {
   @@unique([reportType, reportDate])
   @@index([reportType, reportDate])
 }
+
+// ============================================================
+// SUBSCRIBER SYSTEM — Users, Subscriptions, Notifications
+// ============================================================
+
+model User {
+  id              String   @id @default(cuid())
+  email           String   @unique
+  name            String?
+  phone           String?  // for WhatsApp alerts
+  passwordHash    String?  // nullable: set when user creates account
+  role            String   @default("subscriber") // subscriber | admin
+  isActive        Boolean  @default(true)
+  emailVerified   Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  subscription    Subscription?
+  notifications   NotificationLog[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model Subscription {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  tier            String   @default("free") // free | starter | pro | vip
+  status          String   @default("active") // active | cancelled | expired | trial
+  // Pricing in Naira (kobo stored as integers to avoid float errors)
+  priceKobo       Int      @default(0) // 0=free, 300000=₦3k, 750000=₦7.5k, 1500000=₦15k
+  billingCycle    String   @default("monthly") // monthly | weekly
+  startedAt       DateTime @default(now())
+  expiresAt       DateTime?
+  cancelledAt     DateTime?
+  // Payment (Paystack integration hook — activate when PAYSTACK_SECRET_KEY is set)
+  paystackCustomerId String?
+  paystackSubCode    String?
+  lastPaymentAt      DateTime?
+  lastPaymentRef     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tier, status])
+  @@index([expiresAt])
+}
+
+model NotificationLog {
+  id              String   @id @default(cuid())
+  userId          String
+  channel         String   // email | whatsapp | push
+  type            String   // daily_report | weekly_summary | pick_alert | system
+  subject         String?
+  status          String   @default("pending") // pending | sent | failed
+  sentAt          DateTime?
+  error           String?
+  createdAt       DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@index([status, createdAt])
+}

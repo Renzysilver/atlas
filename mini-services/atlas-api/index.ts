@@ -20,6 +20,8 @@ import { cleaningRouter } from "./routes/cleaning.ts";
 import { featuresRouter } from "./routes/features.ts";
 import { brainosRouter } from "./routes/brainos.ts";
 import { learningRouter } from "./routes/learning.ts";
+import { reportRouter } from "./routes/report.ts";
+import { authRouter } from "./routes/auth.ts";
 
 const PORT = parseInt(process.env.ATLAS_API_PORT || "4001", 10);
 
@@ -88,6 +90,8 @@ app.use("/features", featuresRouter);
 app.use("/brainos", brainosRouter);
 app.use("/layers", brainosRouter);
 app.use("/learning", learningRouter);
+app.use("/report", reportRouter);
+app.use("/auth", authRouter);
 
 // 404
 app.use((_req, res) => {

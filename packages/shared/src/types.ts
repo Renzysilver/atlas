@@ -131,8 +131,49 @@ export interface ApiFootballStandingRow {
 }
 
 // ============================================================
-// PHASE 1 LEAGUE CONFIG
+// MULTI-LEAGUE CONFIG (Phase 1: EPL active, others activatable via env)
 // ============================================================
 
 export const EPL_LEAGUE_ID = 39;
 export const EPL_SEASON = 2024; // 2025-26 season
+
+// All supported leagues — API-Football league IDs
+// Activation: add league ID to ATLAS_ACTIVE_LEAGUES env var (comma-separated)
+// Default: EPL only. Example: ATLAS_ACTIVE_LEAGUES=39,2,140,135,78,61
+export const SUPPORTED_LEAGUES: LeagueConfig[] = [
+  { id: 39,  name: "Premier League",     shortName: "EPL",  country: "England",  season: 2024, active: true  },
+  { id: 2,   name: "Champions League",   shortName: "UCL",  country: "Europe",   season: 2024, active: false },
+  { id: 3,   name: "Europa League",      shortName: "UEL",  country: "Europe",   season: 2024, active: false },
+  { id: 140, name: "La Liga",            shortName: "ESP",  country: "Spain",    season: 2024, active: false },
+  { id: 135, name: "Serie A",            shortName: "ITA",  country: "Italy",    season: 2024, active: false },
+  { id: 78,  name: "Bundesliga",         shortName: "GER",  country: "Germany",  season: 2024, active: false },
+  { id: 61,  name: "Ligue 1",            shortName: "FRA",  country: "France",   season: 2024, active: false },
+  { id: 94,  name: "Primeira Liga",      shortName: "POR",  country: "Portugal", season: 2024, active: false },
+  { id: 203, name: "Nigerian Prem. League", shortName: "NPFL", country: "Nigeria", season: 2024, active: false },
+];
+
+export interface LeagueConfig {
+  id: number;
+  name: string;
+  shortName: string;
+  country: string;
+  season: number;
+  active: boolean;
+}
+
+/**
+ * Returns active leagues based on ATLAS_ACTIVE_LEAGUES env var.
+ * Falls back to EPL only if env var is not set.
+ * Usage: getActiveLeagues() → [{ id: 39, name: "Premier League", ... }]
+ */
+export function getActiveLeagues(): LeagueConfig[] {
+  const envLeagues = process.env.ATLAS_ACTIVE_LEAGUES;
+  if (!envLeagues) {
+    return SUPPORTED_LEAGUES.filter((l) => l.id === EPL_LEAGUE_ID);
+  }
+  const activeIds = envLeagues
+    .split(",")
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => !isNaN(n));
+  return SUPPORTED_LEAGUES.filter((l) => activeIds.includes(l.id));
+}
