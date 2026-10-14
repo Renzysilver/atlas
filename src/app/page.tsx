@@ -642,8 +642,8 @@ export default function Home() {
               <div className="flex justify-between"><span className="text-stone-600">Module 5 — Decision Engine</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
               <div className="flex justify-between"><span className="text-stone-600">Module 6 — Explainability</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
               <div className="flex justify-between"><span className="text-stone-600">Module 7 — Risk Management</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
-              <div className="flex justify-between"><span className="text-stone-600">Module 8 — Adaptive Learning</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">current</Badge></div>
-              <div className="flex justify-between"><span className="text-stone-600">Module 9 — Delivery</span><Badge variant="outline">queued</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Module 8 — Adaptive Learning</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
+              <div className="flex justify-between"><span className="text-stone-600">Module 9 — Delivery</span><Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">done</Badge></div>
             </CardContent>
           </Card>
         </section>
