@@ -1,26 +1,98 @@
 # ATLAS — Institutional Football Intelligence Platform
 
-**Phase 1, Module 1: Data Collection** — built per the ATLAS Master Build Prompt v1.0
-specification. Phase 1 scope is English Premier League only, with API-Football
-as the primary data source.
+**All 9 Modules Complete** — built per the ATLAS Master Build Prompt v1.0.
+Multi-league support (EPL + Champions League + more via `ATLAS_ACTIVE_LEAGUES`).
+Subscription tiers in Naira: Free / Starter ₦3,000 / Pro ₦7,500 / VIP ₦15,000.
 
-## What's Built (Module 1 of 9)
-
-Per Section 17 of the spec, ATLAS is built **one module at a time, with
-architecture review between each**. This is Module 1 — Data Collection. Modules
-2-9 are queued and will be built after Vali/Claude review this module.
+## Build Status — All 9 Modules Done ✅
 
 | # | Module | Status |
 |---|---|---|
-| 1 | Data Collection | ✅ **current** — 7 ACTIVE collectors + 5 STUB collectors |
-| 2 | Cleaning & Validation | queued |
-| 3 | Feature Engineering | queued |
-| 4 | Football Intelligence Engine (17 layers) | queued |
-| 5 | Prediction Decision Engine | queued |
-| 6 | Explainability Engine | queued |
-| 7 | Risk Management Engine | queued |
-| 8 | Adaptive Learning | queued |
-| 9 | Delivery & Daily Report | queued |
+| 1 | Data Collection | ✅ **done** — 7 ACTIVE collectors + 5 STUB collectors |
+| 2 | Cleaning & Validation | ✅ **done** |
+| 3 | Feature Engineering | ✅ **done** |
+| 4 | Football Intelligence Engine (17 layers) | ✅ **done** |
+| 5 | Prediction Decision Engine | ✅ **done** |
+| 6 | Explainability Engine | ✅ **done** |
+| 7 | Risk Management Engine | ✅ **done** — multi-league via `ATLAS_ACTIVE_LEAGUES` |
+| 8 | Adaptive Learning | ✅ **done** — tracks accuracy, self-improves over time |
+| 9 | Delivery & Daily Report | ✅ **done** — cron at 07:00 WAT, tiered email via Resend |
+
+## New in Final Build
+
+- **Auth system** — register/login, HMAC-signed tokens, role-based access
+- **Subscription tiers** — Free / Starter / Pro / VIP (stored in kobo, Paystack-ready)
+- **Admin dashboard** (`/admin`) — MRR/ARR, subscriber management, report trigger, system health
+- **Subscriber dashboard** (`/dashboard`) — tiered picks, confidence meters, bet slip builder, AI reasoning
+- **Login page** (`/login`) — dark-themed, shows tier pricing on register
+- **Daily email delivery** — admin gets full report, subscribers get tier-filtered picks
+- **Admin seed** — `bun prisma/seed.ts` creates `tinnybolt@gmail.com` as VIP admin
+
+## Quickstart (Your Laptop)
+
+### 1. Clone the repo
+```bash
+git clone https://github.com/Renzysilver/atlas.git
+cd atlas
+bun install
+```
+
+### 2. Get your API keys (all free tier works for testing)
+| Service | URL | What it does |
+|---|---|---|
+| API-Football | rapidapi.com → search "API-Football" | Match data, lineups, injuries |
+| Groq | console.groq.com | AI reasoning (LLM) |
+| Resend | resend.com | Email delivery |
+
+### 3. Create your `.env` file
+```bash
+cp infra/.env.example mini-services/atlas-api/.env
+```
+Then edit `mini-services/atlas-api/.env`:
+```env
+DATABASE_URL="file:../../prisma/dev.db"
+API_FOOTBALL_KEY=your_rapidapi_key_here
+GROQ_API_KEY=your_groq_key_here
+RESEND_API_KEY=your_resend_key_here
+ATLAS_ADMIN_EMAIL=tinnybolt@gmail.com
+ATLAS_TOKEN_SECRET=any-long-random-string-here
+ATLAS_ACTIVE_LEAGUES=39,2
+```
+
+### 4. Set up the database
+```bash
+npx prisma db push
+ATLAS_ADMIN_PASSWORD=yourpassword bun prisma/seed.ts
+```
+
+### 5. Start the servers
+```bash
+# Terminal 1 — API backend (port 4001)
+bun run atlas:api
+
+# Terminal 2 — Frontend (port 3000)
+bun run dev
+```
+
+### 6. Log in
+Go to `http://localhost:3000/login` → sign in with `tinnybolt@gmail.com` + your password → you're in the admin console.
+
+### 7. Test
+Admin console → Overview → **"Generate & Send Today's Report"** — watch the predictions fire and check your email.
+
+---
+
+## Hosting (Going Live)
+
+To have ATLAS run 24/7 and send daily emails automatically, you need a server.
+**Cheapest option: Railway.app**
+- $5/month, deploys directly from this GitHub repo
+- Set all the env vars in Railway's dashboard
+- The cron job runs at 07:00 WAT every day automatically — no laptop needed
+
+See `infra/README.md` for full deployment instructions.
+
+---
 
 ## Architecture
 
