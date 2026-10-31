@@ -3,10 +3,10 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
-const ATLAS_API_PORT = process.env.NEXT_PUBLIC_ATLAS_API_PORT || '4001'
+const ATLAS_API_BASE = process.env.NEXT_PUBLIC_ATLAS_API_URL || 'http://localhost:4001'
 
 async function apiPost(path: string, body: object) {
-  const res = await fetch(`${path}?XTransformPort=${ATLAS_API_PORT}`, {
+  const res = await fetch(`${ATLAS_API_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

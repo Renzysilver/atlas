@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 
-const API = process.env.NEXT_PUBLIC_ATLAS_API_PORT || '4001'
+const API = process.env.NEXT_PUBLIC_ATLAS_API_URL || 'http://localhost:4001'
 
 async function apiFetch<T>(path: string, token: string): Promise<T> {
   const url = `${path}?XTransformPort=${API}`
